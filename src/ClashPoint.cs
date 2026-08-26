@@ -9,7 +9,7 @@ namespace KiBattle;
 public partial class ClashPoint : Node2D
 {
     private ShaderMaterial _mat = null!;
-    private GpuParticles2D _sparks = null!;
+    private GpuParticles2D _sparksL = null!, _sparksR = null!;
     private PointLight2D _light = null!;
     private float _time;
 
@@ -23,19 +23,17 @@ public partial class ClashPoint : Node2D
         var quad = new ColorRect
         {
             Material = _mat,
-            OffsetLeft = -280, OffsetTop = -280, OffsetRight = 280, OffsetBottom = 280,
+            OffsetLeft = -340, OffsetTop = -340, OffsetRight = 340, OffsetBottom = 340,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         AddChild(quad);
 
-        _sparks = new GpuParticles2D
-        {
-            Amount = 48,
-            Lifetime = 0.5,
-            Explosiveness = 0.1f,
-            ProcessMaterial = MakeSparkMaterial(),
-        };
-        AddChild(_sparks);
+        // Two spark streams, one per caster's color; the dominating side sprays
+        // its sparks through toward the loser.
+        _sparksL = MakeSparks(+1f);
+        _sparksR = MakeSparks(-1f);
+        AddChild(_sparksL);
+        AddChild(_sparksR);
 
         _light = new PointLight2D
         {
@@ -47,17 +45,36 @@ public partial class ClashPoint : Node2D
         Visible = false;
     }
 
-    private static ParticleProcessMaterial MakeSparkMaterial() => new()
+    /// <summary>
+    /// dirX marks which side's beam feeds this spray. Like a pressure jet hitting
+    /// a plate, the material deflects at the interface: a fast fan roughly
+    /// perpendicular to the beam, leaning past the clash toward the loser,
+    /// arcing over under heavy gravity.
+    /// </summary>
+    private static GpuParticles2D MakeSparks(float dirX) => new()
     {
-        Direction = new Vector3(0, -1, 0),
-        Spread = 180f,
-        InitialVelocityMin = 250f,
-        InitialVelocityMax = 700f,
-        Gravity = new Vector3(0, 350, 0),
-        ScaleMin = 2.0f,
-        ScaleMax = 5.0f,
-        Color = Colors.White,
+        Amount = 90,
+        Lifetime = 0.5,
+        Texture = MakeStreakTexture(),
+        ProcessMaterial = new ParticleProcessMaterial
+        {
+            Direction = new Vector3(dirX * 0.35f, -1f, 0),
+            Spread = 50f,
+            InitialVelocityMin = 520f,
+            InitialVelocityMax = 1250f,
+            Gravity = new Vector3(0, 950, 0),
+            ScaleMin = 0.7f,
+            ScaleMax = 1.9f,
+            ParticleFlagAlignY = true, // streak stretches along its velocity
+        },
     };
+
+    private static Texture2D MakeStreakTexture()
+    {
+        var img = Image.CreateEmpty(4, 18, false, Image.Format.Rgba8);
+        img.Fill(Colors.White);
+        return ImageTexture.CreateFromImage(img);
+    }
 
     private static Texture2D MakeLightTexture()
     {
@@ -79,7 +96,8 @@ public partial class ClashPoint : Node2D
     {
         _time += delta;
         Visible = intensity > 0.03f;
-        _sparks.Emitting = intensity > 0.4f;
+        _sparksL.Emitting = intensity > 0.25f;
+        _sparksR.Emitting = intensity > 0.25f;
         if (!Visible) return;
 
         _mat.SetShaderParameter("color_a", leftGlow);
@@ -87,8 +105,14 @@ public partial class ClashPoint : Node2D
         _mat.SetShaderParameter("intensity", intensity);
         _mat.SetShaderParameter("ratio", ratio);
 
-        _sparks.Modulate = leftGlow.Lerp(rightGlow, ratio);
-        _light.Color = leftGlow.Lerp(rightGlow, 0.5f);
+        // Winner's color dominates the spray; loser still spits a few sparks.
+        float leftDom = 1f - ratio;
+        _sparksL.AmountRatio = 0.15f + 0.85f * Mathf.Pow(leftDom, 1.5f);
+        _sparksR.AmountRatio = 0.15f + 0.85f * Mathf.Pow(ratio, 1.5f);
+        _sparksL.Modulate = new Color(leftGlow.R * 1.9f, leftGlow.G * 1.9f, leftGlow.B * 1.9f);
+        _sparksR.Modulate = new Color(rightGlow.R * 1.9f, rightGlow.G * 1.9f, rightGlow.B * 1.9f);
+
+        _light.Color = leftGlow.Lerp(rightGlow, ratio);
         _light.Energy = intensity * (0.9f + 0.25f * Mathf.Sin(_time * 37f));
     }
 }
