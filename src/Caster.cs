@@ -26,8 +26,14 @@ public partial class Caster : Node2D
     public float ReformTimer { get; private set; }
 
     public bool IsExhausted => ExhaustTimer > 0f;
-    public bool IsChanneling => WantsChannel && !IsExhausted && Mana > 0f;
-    public bool IsOverdriving => IsChanneling && WantsOverdrive;
+
+    /// <summary>Current power tier. The base beam is always on; Space empowers it.</summary>
+    public PowerTier Tier =>
+        IsExhausted ? PowerTier.Idle :
+        WantsChannel && WantsOverdrive && Mana > 0f ? PowerTier.Overdrive :
+        WantsChannel && Mana > 0f ? PowerTier.Empowered : PowerTier.Idle;
+
+    public bool IsOverdriving => Tier == PowerTier.Overdrive;
     public Element CurrentElement => Loadout.Elements[ElementSlot];
     public ElementStyle Style => ElementDb.Style(CurrentElement);
 
@@ -88,9 +94,12 @@ public partial class Caster : Node2D
         ExhaustTimer = Mathf.Max(0f, ExhaustTimer - delta);
 
         float regen = IsExhausted ? Tuning.ManaRegenExhausted : Tuning.ManaRegen * regenScale;
-        float drain = IsChanneling
-            ? Tuning.BeamDrain[(int)Beam] * (WantsOverdrive ? Tuning.OverdriveDrainMult : 1f)
-            : 0f;
+        float drain = Tier switch
+        {
+            PowerTier.Overdrive => Tuning.BeamDrain[(int)Beam] * Tuning.OverdriveDrainMult,
+            PowerTier.Empowered => Tuning.BeamDrain[(int)Beam],
+            _ => 0f, // the base beam is free
+        };
         Mana = Mathf.Clamp(Mana + (regen - drain) * delta, 0f, Tuning.ManaMax);
 
         if (Mana <= 0f && !IsExhausted)
@@ -104,12 +113,17 @@ public partial class Caster : Node2D
     /// (0 = own edge, 1 = opponent's edge) for the desperation bonus.</summary>
     public float ComputePush(Caster opponent, float ownSideClashX)
     {
-        if (!IsChanneling) return 0f;
+        if (IsExhausted) return 0f; // the beam sputters out: the punish window
 
+        float tierMult = Tier switch
+        {
+            PowerTier.Overdrive => Tuning.OverdrivePush,
+            PowerTier.Empowered => 1f,
+            _ => Tuning.IdlePushMult,
+        };
         bool anyPinpoint = Beam == BeamType.Pinpoint || opponent.Beam == BeamType.Pinpoint;
         float m = ElementDb.EffectiveMultiplier(CurrentElement, opponent.CurrentElement, anyPinpoint);
-        float push = Tuning.BeamPush[(int)Beam] * m;
-        if (IsOverdriving) push *= Tuning.OverdrivePush;
+        float push = tierMult * Tuning.BeamPush[(int)Beam] * m;
         if (ownSideClashX < Tuning.DesperationZone) push *= Tuning.DesperationMult;
         if (ReformTimer > 0f) push *= Tuning.ReformPush;
         return push;

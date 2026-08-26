@@ -72,15 +72,19 @@ public partial class CasterVisual : Node2D
         float dt = (float)delta;
         var glow = _caster.Style.Glow;
 
-        float channel = _caster.IsChanneling ? (_caster.IsOverdriving ? 1f : 0.65f) : 0.18f;
-        if (_caster.IsExhausted) channel = 0.05f;
+        float channel = _caster.IsExhausted ? 0.05f : _caster.Tier switch
+        {
+            PowerTier.Overdrive => 1f,
+            PowerTier.Empowered => 0.65f,
+            _ => 0.3f,
+        };
 
         // HDR aura: bright enough to bloom when channeling hard.
         var target = new Color(glow.R * (0.4f + channel * 1.2f), glow.G * (0.4f + channel * 1.2f),
                                glow.B * (0.4f + channel * 1.2f), 0.35f + channel * 0.4f);
         _aura.Color = _aura.Color.Lerp(target, 8f * dt);
 
-        _muzzle.Emitting = _caster.IsChanneling;
+        _muzzle.Emitting = !_caster.IsExhausted;
         _muzzle.Modulate = glow;
 
         if (_dissolve > 0f)

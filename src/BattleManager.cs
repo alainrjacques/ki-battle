@@ -234,8 +234,8 @@ public partial class BattleManager : Node2D
             _clash.UpdateClash(LeftCaster.Style.Glow, RightCaster.Style.Glow, combined, ratio, dt);
         }
 
-        // Constant low rumble while both beams are locked.
-        if (State == BattleState.Fighting && _leftBeam.DisplayIntensity > 0.3f && _rightBeam.DisplayIntensity > 0.3f)
+        // Constant low rumble while both beams are pushing hard (idle beams stay calm).
+        if (State == BattleState.Fighting && _leftBeam.DisplayIntensity > 0.6f && _rightBeam.DisplayIntensity > 0.6f)
             _camera?.AddTrauma(0.35f * dt * (_leftBeam.DisplayIntensity + _rightBeam.DisplayIntensity) * 0.5f);
     }
 
@@ -243,11 +243,18 @@ public partial class BattleManager : Node2D
     {
         if (State is BattleState.Ko or BattleState.Result)
             return WinnerSide == side ? 2.2f : 0f;
-        if (!caster.IsChanneling) return 0f;
         float reform = caster.ReformTimer > 0f
             ? Mathf.Lerp(1f, 0.3f, caster.ReformTimer / Tuning.ReformDuration)
             : 1f;
-        return (caster.IsOverdriving ? 1.6f : 1f) * reform;
+        // The beam is always lit: a sputtering wisp when exhausted, a base glow at
+        // idle, full when empowered, blazing on overdrive.
+        float tier = caster.IsExhausted ? 0.12f : caster.Tier switch
+        {
+            PowerTier.Overdrive => 1.6f,
+            PowerTier.Empowered => 1.0f,
+            _ => 0.45f,
+        };
+        return tier * reform;
     }
 
     private void UpdateDebugLabel()

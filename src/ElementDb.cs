@@ -7,6 +7,10 @@ public enum Element { Fire = 0, Ice = 1, Water = 2, Lightning = 3, Darkness = 4,
 
 public enum BeamType { Single = 0, Twin = 1, Pinpoint = 2 }
 
+/// <summary>The beam is always lit: Idle is the free base beam, Empowered is the
+/// mana-draining channel (Space), Overdrive stacks on top (Shift).</summary>
+public enum PowerTier { Idle = 0, Empowered = 1, Overdrive = 2 }
+
 /// <summary>Visual identity of one element, fed into shaders, particles and HUD.</summary>
 public readonly record struct ElementStyle(
     string DisplayName,
@@ -43,6 +47,9 @@ public static class Tuning
     public static readonly float[] BeamPush = { 1.00f, 1.35f, 0.75f };   // Single, Twin, Pinpoint
     public static readonly float[] BeamDrain = { 12f, 20f, 7f };
     public const float PierceDamp = 0.5f;       // pinpoint damps elemental multiplier toward neutral
+
+    // Power tiers
+    public const float IdlePushMult = 0.35f; // the always-on base beam's push
 
     // Mana
     public const float ManaMax = 100f;

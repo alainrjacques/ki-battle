@@ -37,6 +37,18 @@ float fbm(vec2 p) {
 	return 0.55 * vnoise(p) + 0.30 * vnoise(p * 2.13) + 0.15 * vnoise(p * 4.71);
 }
 
+// Piecewise-LINEAR 1D noise: sharp kinks, the backbone of the lightning bolts.
+float lin1d(float x, float s) {
+	float i = floor(x);
+	float f = fract(x);
+	return mix(hash21(vec2(i, s)), hash21(vec2(i + 1.0, s)), f) * 2.0 - 1.0;
+}
+
+// Two octaves of kinked displacement = a jagged bolt path.
+float jag(float x, float s) {
+	return lin1d(x * 3.0, s) * 0.7 + lin1d(x * 9.0, s + 5.1) * 0.3;
+}
+
 void fragment() {
 	float t = TIME;
 	// Pattern-space x: one unit per ~240 px of beam so visuals don't stretch with length.
@@ -51,11 +63,6 @@ void fragment() {
 	float n = fbm(vec2(x * noise_scale * 0.35 - t * scroll_speed, seed * 7.3)) - 0.5;
 	if (style == 1) { // Ice: crystalline, faceted
 		n = floor(n * 6.0) / 6.0;
-	}
-	if (style == 3) { // Lightning: stepped jags, re-seeded rapidly
-		float tq = floor(t / 0.06);
-		n = vnoise(vec2(floor(x * 7.0) * 0.53 + tq * 13.7, seed * 7.3)) - 0.5;
-		n *= 1.6;
 	}
 	if (style == 2) { // Water: smooth flowing sine on top of soft noise
 		center += 0.05 * sin(x * 3.0 - t * 2.2) * widthScale;
@@ -91,6 +98,35 @@ void fragment() {
 		bright *= 1.25; // concentrated: brighter core for its width
 	}
 
+	if (style == 3) {
+		// Lightning replaces the band profile entirely: a bright main bolt plus
+		// dimmer branch filaments, all piecewise-linear jagged paths re-seeded
+		// rapidly and converging at the muzzle and the clash point.
+		float tq = floor(t * 12.0) * 0.618 + seed;
+		float env = mix(0.10, 1.0, sin(3.14159 * UV.x)); // pinch at both ends
+		float boltAmp = 0.30 * widthScale;
+		profile = 0.0;
+
+		int mains = beam_type == 1 ? 2 : 1;
+		float mainW = (beam_type == 2 ? 0.014 : 0.026) * (0.7 + 0.3 * widthScale);
+		for (int b = 0; b < 2; b++) {
+			if (b >= mains) { break; }
+			float bs = tq + float(b) * 17.3;
+			float c = 0.5 + jag(x, bs) * boltAmp * env;
+			if (beam_type == 1) { // twin: two bolts spiralling around each other
+				c += (b == 0 ? 1.0 : -1.0) * 0.16 * widthScale * sin(x * helix_freq + t * 2.0);
+			}
+			profile += smoothstep(mainW, 0.0, abs(y - c)) * 1.15;
+		}
+		for (int b = 0; b < 3; b++) { // stray branches, wider wander, faint
+			float bs = tq + 31.7 + float(b) * 7.9;
+			float c = 0.5 + jag(x * 1.4, bs) * boltAmp * 1.5 * env;
+			profile += smoothstep(0.011, 0.0, abs(y - c)) * 0.32;
+		}
+		profile = clamp(profile, 0.0, 1.4);
+		bright *= 0.85 + 0.4 * hash21(vec2(tq, seed)); // flicker per re-seed
+	}
+
 	// --- Element flourishes on intensity ---
 	if (style == 0) { // Fire: living flicker + licks
 		float licks = fbm(vec2(x * 2.0 - t * 3.0, y * 3.0 + seed));
@@ -99,10 +135,6 @@ void fragment() {
 	}
 	if (style == 2) { // Water: caustic shimmer
 		profile *= 0.85 + 0.3 * vnoise(vec2(x * 5.0 - t * 1.2, y * 8.0 + seed));
-	}
-	if (style == 3) { // Lightning: whole-beam stutter
-		float fl = vnoise(vec2(floor(t / 0.06) * 3.1, seed));
-		bright *= 0.55 + 0.75 * fl;
 	}
 	if (style == 5) { // Poison: drifting bubbles inside the beam
 		float b = vnoise(vec2(x * 3.0 - t * 0.9, y * 7.0 + seed));

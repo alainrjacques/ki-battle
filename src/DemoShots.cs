@@ -13,6 +13,7 @@ public partial class DemoShots : Node
     private static readonly (Element l, BeamType lb, Element r, BeamType rb)[] Combos =
     {
         (Element.Fire, BeamType.Single, Element.Water, BeamType.Single),
+        (Element.Lightning, BeamType.Single, Element.Lightning, BeamType.Pinpoint),
         (Element.Lightning, BeamType.Twin, Element.Darkness, BeamType.Twin),
         (Element.Ice, BeamType.Pinpoint, Element.Poison, BeamType.Single),
         (Element.Holy, BeamType.Single, Element.Light, BeamType.Twin),
@@ -51,6 +52,15 @@ public partial class DemoShots : Node
             GD.Print($"[shots] saved shot {i}");
             i++;
         }
+        // Power-tier contrast: left idles (base beam), right overdrives.
+        battle.LeftCaster.DebugSetCombo(Element.Ice, BeamType.Single);
+        battle.RightCaster.DebugSetCombo(Element.Fire, BeamType.Single);
+        battle.LeftCaster.WantsChannel = false;
+        battle.RightCaster.WantsOverdrive = true;
+        await WaitSeconds(1.6f);
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_tiers_idle_vs_overdrive.png");
+        GD.Print("[shots] saved tier contrast");
+
         GD.Print("[shots] done");
         GetTree().Quit(0);
     }
