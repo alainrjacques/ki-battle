@@ -116,7 +116,9 @@ void fragment() {
 			if (beam_type == 1) { // twin: two bolts spiralling around each other
 				c += (b == 0 ? 1.0 : -1.0) * 0.16 * widthScale * sin(x * helix_freq + t * 2.0);
 			}
-			profile += smoothstep(mainW, 0.0, abs(y - c)) * 1.15;
+			float dm = abs(y - c);
+			profile += smoothstep(mainW, 0.0, dm) * 1.15   // hot white core
+			         + smoothstep(0.10, 0.0, dm) * 0.22;   // soft haze hugging the bolt
 		}
 		for (int b = 0; b < 3; b++) { // stray branches, wider wander, faint
 			float bs = tq + 31.7 + float(b) * 7.9;
