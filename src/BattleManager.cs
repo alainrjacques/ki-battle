@@ -259,7 +259,7 @@ public partial class BattleManager : Node2D
 
     private void UpdateDebugLabel()
     {
-        if (_debugLabel == null) return;
+        if (_debugLabel == null || !_debugLabel.Visible) return; // hidden by the HUD in normal play
         _debugLabel.Text =
             $"state={State} clash={ClashX:0.000} t={FightDuration:0.0}s\n" +
             $"L: {LeftCaster.CurrentElement}/{LeftCaster.Beam} mana={LeftCaster.Mana:0} {(LeftCaster.IsExhausted ? "EXH" : "")}\n" +

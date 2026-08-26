@@ -13,6 +13,9 @@ public partial class ClashPoint : Node2D
     private PointLight2D _light = null!;
     private float _time;
 
+    private static readonly StringName SnColorA = "color_a", SnColorB = "color_b",
+        SnIntensity = "intensity", SnRatio = "ratio";
+
     public override void _Ready()
     {
         // The headless dummy renderer crashes intermittently on GPU resources; skip entirely.
@@ -100,10 +103,10 @@ public partial class ClashPoint : Node2D
         foreach (var s in _sparksR) s.Emitting = intensity > 0.25f;
         if (!Visible) return;
 
-        _mat.SetShaderParameter("color_a", leftGlow);
-        _mat.SetShaderParameter("color_b", rightGlow);
-        _mat.SetShaderParameter("intensity", intensity);
-        _mat.SetShaderParameter("ratio", ratio);
+        _mat.SetShaderParameter(SnColorA, leftGlow);
+        _mat.SetShaderParameter(SnColorB, rightGlow);
+        _mat.SetShaderParameter(SnIntensity, intensity);
+        _mat.SetShaderParameter(SnRatio, ratio);
 
         // Winner's color dominates the spray; loser still spits a few sparks.
         float leftDom = 1f - ratio;

@@ -314,32 +314,45 @@ public partial class Hud : CanvasLayer
         _beamCooldown.Size = new Vector2(440 * _player.BeamCooldown / Tuning.BeamSwitchCooldown, 5);
     }
 
+    private Element _lastTeleElement = (Element)(-1);
+    private BeamType _lastTeleBeam = (BeamType)(-1);
+    private int _lastMatchState = -99;
+
     private void UpdateTelegraph(float dt)
     {
-        var style = _enemy.Style;
-        _teleDiamond.Color = style.Glow;
-        _teleElement.Text = style.DisplayName.ToUpper();
-        _teleBeam.Text = BeamNames[(int)_enemy.Beam];
+        // Text and theme overrides only change on a switch; don't rebuild them at 60 fps.
+        if (_enemy.CurrentElement != _lastTeleElement || _enemy.Beam != _lastTeleBeam)
+        {
+            _lastTeleElement = _enemy.CurrentElement;
+            _lastTeleBeam = _enemy.Beam;
+            var style = _enemy.Style;
+            _teleDiamond.Color = style.Glow;
+            _teleElement.Text = style.DisplayName.ToUpper();
+            _teleBeam.Text = BeamNames[(int)_enemy.Beam];
+        }
 
         _teleFlash = Mathf.Max(0f, _teleFlash - dt * 2.5f);
         _telegraph.Modulate = new Color(1 + _teleFlash * 2f, 1 + _teleFlash * 2f, 1 + _teleFlash * 2f);
 
         bool anyPinpoint = _player.Beam == BeamType.Pinpoint || _enemy.Beam == BeamType.Pinpoint;
         float m = ElementDb.EffectiveMultiplier(_player.CurrentElement, _enemy.CurrentElement, anyPinpoint);
-        if (m > 1.05f)
+        int state = m > 1.05f ? 1 : m < 0.95f ? -1 : 0;
+        if (state == _lastMatchState) return;
+        _lastMatchState = state;
+        switch (state)
         {
-            _matchup.Text = "▲ ADVANTAGE";
-            _matchup.AddThemeColorOverride("font_color", new Color(0.4f, 1f, 0.4f));
-        }
-        else if (m < 0.95f)
-        {
-            _matchup.Text = "▼ COUNTERED";
-            _matchup.AddThemeColorOverride("font_color", new Color(1f, 0.4f, 0.35f));
-        }
-        else
-        {
-            _matchup.Text = "● EVEN";
-            _matchup.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.85f));
+            case 1:
+                _matchup.Text = "▲ ADVANTAGE";
+                _matchup.AddThemeColorOverride("font_color", new Color(0.4f, 1f, 0.4f));
+                break;
+            case -1:
+                _matchup.Text = "▼ COUNTERED";
+                _matchup.AddThemeColorOverride("font_color", new Color(1f, 0.4f, 0.35f));
+                break;
+            default:
+                _matchup.Text = "● EVEN";
+                _matchup.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.85f));
+                break;
         }
     }
 

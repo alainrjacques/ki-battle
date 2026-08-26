@@ -11,6 +11,13 @@ public partial class Beam : Node2D
     private Line2D _line = null!;
     private ShaderMaterial _mat = null!;
     private float _displayIntensity;
+    private int _appliedStyle = -1;
+    private BeamType _appliedType = (BeamType)(-1);
+
+    // Cached uniform names: a string literal here would marshal to a new StringName every call.
+    private static readonly StringName SnCore = "core_color", SnGlow = "glow_color", SnStyle = "style",
+        SnType = "beam_type", SnIntensity = "intensity", SnNoise = "noise_scale", SnScroll = "scroll_speed",
+        SnWobble = "wobble_amp", SnLen = "beam_len", SnSeed = "seed";
 
     public override void _Ready()
     {
@@ -48,17 +55,23 @@ public partial class Beam : Node2D
         _line.SetPointPosition(0, from);
         _line.SetPointPosition(1, to);
 
+        // Style uniforms only change on an element/beam switch; don't re-marshal them at 60 fps.
         var style = caster.Style;
-        _mat.SetShaderParameter("core_color", style.Core);
-        _mat.SetShaderParameter("glow_color", style.Glow);
-        _mat.SetShaderParameter("style", style.StyleIndex);
-        _mat.SetShaderParameter("beam_type", (int)caster.Beam);
-        _mat.SetShaderParameter("intensity", _displayIntensity);
-        _mat.SetShaderParameter("noise_scale", style.NoiseScale);
-        _mat.SetShaderParameter("scroll_speed", style.ScrollSpeed);
-        _mat.SetShaderParameter("wobble_amp", style.WobbleAmp);
-        _mat.SetShaderParameter("beam_len", from.DistanceTo(to));
-        _mat.SetShaderParameter("seed", caster.Side == 0 ? 3.1f : 9.7f);
+        if (style.StyleIndex != _appliedStyle || caster.Beam != _appliedType)
+        {
+            _appliedStyle = style.StyleIndex;
+            _appliedType = caster.Beam;
+            _mat.SetShaderParameter(SnCore, style.Core);
+            _mat.SetShaderParameter(SnGlow, style.Glow);
+            _mat.SetShaderParameter(SnStyle, style.StyleIndex);
+            _mat.SetShaderParameter(SnType, (int)caster.Beam);
+            _mat.SetShaderParameter(SnNoise, style.NoiseScale);
+            _mat.SetShaderParameter(SnScroll, style.ScrollSpeed);
+            _mat.SetShaderParameter(SnWobble, style.WobbleAmp);
+            _mat.SetShaderParameter(SnSeed, caster.Side == 0 ? 3.1f : 9.7f);
+        }
+        _mat.SetShaderParameter(SnIntensity, _displayIntensity);
+        _mat.SetShaderParameter(SnLen, from.DistanceTo(to));
     }
 
     public float DisplayIntensity => _displayIntensity;
