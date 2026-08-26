@@ -34,10 +34,10 @@ public static class Tuning
 
     // Pacing guarantees: fights must resolve. Escalation amplifies net push over time,
     // sudden death stops base mana regen, and the judge decides at the hard cap.
-    public const float EscalationStart = 45f;
-    public const float EscalationRatePerSec = 0.03f;
-    public const float SuddenDeathStart = 90f;
-    public const float MaxDuration = 150f;
+    public const float EscalationStart = 30f;
+    public const float EscalationRatePerSec = 0.04f;
+    public const float SuddenDeathStart = 75f;
+    public const float MaxDuration = 120f;
 
     // Beam types: push multiplier / mana drain per second
     public static readonly float[] BeamPush = { 1.00f, 1.35f, 0.75f };   // Single, Twin, Pinpoint

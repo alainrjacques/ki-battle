@@ -15,6 +15,9 @@ public partial class ClashPoint : Node2D
 
     public override void _Ready()
     {
+        // The headless dummy renderer crashes intermittently on GPU resources; skip entirely.
+        if (DisplayServer.GetName() == "headless") { SetProcess(false); return; }
+
         _mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/clash.gdshader") };
 
         var quad = new ColorRect

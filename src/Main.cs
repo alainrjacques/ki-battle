@@ -22,6 +22,7 @@ public partial class Main : Node
             return;
         }
         ShowLoadout();
+        if (Game.Instance.SmokeFlowMode) AddChild(new FlowTest());
     }
 
     public void ShowLoadout()

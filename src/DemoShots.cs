@@ -22,6 +22,14 @@ public partial class DemoShots : Node
 
     public override async void _Ready()
     {
+        // Loadout screen first
+        var loadout = GD.Load<PackedScene>("res://scenes/LoadoutScreen.tscn").Instantiate();
+        AddChild(loadout);
+        await WaitSeconds(0.4f);
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_loadout.png");
+        GD.Print("[shots] saved loadout screen");
+        loadout.QueueFree();
+
         Game.Instance.PlayerLoadout = Loadout.Default();
         Game.Instance.EnemyLoadout = Loadout.Default();
         var battle = GD.Load<PackedScene>("res://scenes/Battle.tscn").Instantiate<BattleManager>();

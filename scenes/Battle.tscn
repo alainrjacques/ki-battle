@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://src/ClashPoint.cs" id="5_clash"]
 [ext_resource type="Script" path="res://src/BattleCamera.cs" id="6_cam"]
 [ext_resource type="Shader" path="res://shaders/background.gdshader" id="7_bg"]
+[ext_resource type="Script" path="res://src/Hud.cs" id="8_hud"]
 
 [sub_resource type="ShaderMaterial" id="SM_bg"]
 shader = ExtResource("7_bg")
@@ -64,6 +65,9 @@ script = ExtResource("4_beam")
 
 [node name="Clash" type="Node2D" parent="."]
 script = ExtResource("5_clash")
+
+[node name="Hud" type="CanvasLayer" parent="."]
+script = ExtResource("8_hud")
 
 [node name="DebugLabel" type="Label" parent="."]
 offset_left = 20.0

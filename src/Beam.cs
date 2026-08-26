@@ -14,6 +14,9 @@ public partial class Beam : Node2D
 
     public override void _Ready()
     {
+        // The headless dummy renderer crashes intermittently on GPU resources; skip entirely.
+        if (DisplayServer.GetName() == "headless") { SetProcess(false); return; }
+
         _mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/beam.gdshader") };
 
         // Line2D stretch UVs require an assigned texture; a 1x1 white pixel suffices.

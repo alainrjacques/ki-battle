@@ -25,6 +25,9 @@ public partial class CasterVisual : Node2D
 
     public override void _Ready()
     {
+        // The headless dummy renderer crashes intermittently on GPU resources; skip entirely.
+        if (DisplayServer.GetName() == "headless") { SetProcess(false); return; }
+
         _caster = GetParent<Caster>();
 
         _aura = new Polygon2D

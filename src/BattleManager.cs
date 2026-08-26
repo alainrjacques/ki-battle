@@ -49,7 +49,7 @@ public partial class BattleManager : Node2D
         // visuals are meaningless there, so drop every visual node instead.
         if (DisplayServer.GetName() == "headless")
         {
-            foreach (string n in new[] { "PlayerBeam", "EnemyBeam", "Clash", "Background", "WorldEnvironment", "BattleCamera" })
+            foreach (string n in new[] { "PlayerBeam", "EnemyBeam", "Clash", "Background", "WorldEnvironment", "BattleCamera", "Hud" })
                 GetNodeOrNull(n)?.QueueFree();
             GetNodeOrNull("PlayerCaster/Visual")?.QueueFree();
             GetNodeOrNull("EnemyCaster/Visual")?.QueueFree();
