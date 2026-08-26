@@ -16,6 +16,11 @@ public partial class Main : Node
             AddChild(smoke);
             return;
         }
+        if (Game.Instance.ShotsMode)
+        {
+            AddChild(new DemoShots());
+            return;
+        }
         ShowLoadout();
     }
 

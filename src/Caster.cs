@@ -69,6 +69,15 @@ public partial class Caster : Node2D
         return true;
     }
 
+    /// <summary>Visual-check helper (F1 cycle): force any element/beam combo.</summary>
+    public void DebugSetCombo(Element element, BeamType beam)
+    {
+        Loadout.Elements[ElementSlot] = element;
+        Beam = beam;
+        ElementChanged?.Invoke(element);
+        BeamTypeChanged?.Invoke(beam);
+    }
+
     /// <summary>Advance mana and timers by one physics step. Called by BattleManager.
     /// regenScale drops to 0 in sudden death (exhaust recovery is unaffected).</summary>
     public void Tick(float delta, float regenScale = 1f)

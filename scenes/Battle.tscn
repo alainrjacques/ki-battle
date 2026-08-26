@@ -1,34 +1,69 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://src/BattleManager.cs" id="1_bm"]
 [ext_resource type="Script" path="res://src/Caster.cs" id="2_caster"]
+[ext_resource type="Script" path="res://src/CasterVisual.cs" id="3_visual"]
+[ext_resource type="Script" path="res://src/Beam.cs" id="4_beam"]
+[ext_resource type="Script" path="res://src/ClashPoint.cs" id="5_clash"]
+[ext_resource type="Script" path="res://src/BattleCamera.cs" id="6_cam"]
+[ext_resource type="Shader" path="res://shaders/background.gdshader" id="7_bg"]
+
+[sub_resource type="ShaderMaterial" id="SM_bg"]
+shader = ExtResource("7_bg")
+
+[sub_resource type="Environment" id="Env_glow"]
+background_mode = 3
+glow_enabled = true
+glow_intensity = 0.55
+glow_bloom = 0.02
+glow_blend_mode = 0
+glow_hdr_threshold = 1.5
+glow_levels/2 = 0.6
+glow_levels/3 = 1.0
+glow_levels/5 = 1.0
 
 [node name="Battle" type="Node2D"]
 script = ExtResource("1_bm")
 
+[node name="Background" type="ColorRect" parent="."]
+offset_right = 1920.0
+offset_bottom = 1080.0
+mouse_filter = 2
+material = SubResource("SM_bg")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env_glow")
+
+[node name="BattleCamera" type="Camera2D" parent="."]
+position = Vector2(960, 540)
+script = ExtResource("6_cam")
+
 [node name="PlayerCaster" type="Node2D" parent="."]
-position = Vector2(200, 700)
+position = Vector2(220, 900)
+scale = Vector2(1.25, 1.25)
 script = ExtResource("2_caster")
 Side = 0
 
-[node name="Placeholder" type="ColorRect" parent="PlayerCaster"]
-offset_left = -20.0
-offset_top = -100.0
-offset_right = 20.0
-offset_bottom = 20.0
-color = Color(0.3, 0.5, 1, 1)
+[node name="Visual" type="Node2D" parent="PlayerCaster"]
+script = ExtResource("3_visual")
 
 [node name="EnemyCaster" type="Node2D" parent="."]
-position = Vector2(1720, 700)
+position = Vector2(1700, 900)
+scale = Vector2(-1.25, 1.25)
 script = ExtResource("2_caster")
 Side = 1
 
-[node name="Placeholder" type="ColorRect" parent="EnemyCaster"]
-offset_left = -20.0
-offset_top = -100.0
-offset_right = 20.0
-offset_bottom = 20.0
-color = Color(1, 0.4, 0.3, 1)
+[node name="Visual" type="Node2D" parent="EnemyCaster"]
+script = ExtResource("3_visual")
+
+[node name="PlayerBeam" type="Node2D" parent="."]
+script = ExtResource("4_beam")
+
+[node name="EnemyBeam" type="Node2D" parent="."]
+script = ExtResource("4_beam")
+
+[node name="Clash" type="Node2D" parent="."]
+script = ExtResource("5_clash")
 
 [node name="DebugLabel" type="Label" parent="."]
 offset_left = 20.0

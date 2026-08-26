@@ -7,7 +7,7 @@ public enum BattleState { Intro, Fighting, Ko, Result }
 
 /// <summary>
 /// Root of Battle.tscn. Owns the clash scalar, runs the battle state machine,
-/// and wires controllers onto the two casters.
+/// wires controllers onto the two casters, and drives all battle visuals.
 /// </summary>
 public partial class BattleManager : Node2D
 {
@@ -27,14 +27,43 @@ public partial class BattleManager : Node2D
     private float _introTimer = 1.5f;
     private Label? _debugLabel;
 
+    // Visuals
+    private Beam? _leftBeam, _rightBeam;
+    private ClashPoint? _clash;
+    private BattleCamera? _camera;
+    private ColorRect? _flash;
+    private float _lastPushLeft, _lastPushRight;
+    private int _momentumSign;
+    private bool _wasOverdrivingL, _wasOverdrivingR;
+    private float _koTimer;
+    private double _prevTimeScale = 1.0;
+    private int _debugCombo;
+
     public override void _Ready()
     {
         LeftCaster = GetNode<Caster>("PlayerCaster");
         RightCaster = GetNode<Caster>("EnemyCaster");
         _debugLabel = GetNodeOrNull<Label>("DebugLabel");
+        _leftBeam = GetNodeOrNull<Beam>("PlayerBeam");
+        _rightBeam = GetNodeOrNull<Beam>("EnemyBeam");
+        _clash = GetNodeOrNull<ClashPoint>("Clash");
+        _camera = GetNodeOrNull<BattleCamera>("BattleCamera");
 
         LeftCaster.Setup(Game.Instance.PlayerLoadout);
         RightCaster.Setup(Game.Instance.EnemyLoadout);
+
+        LeftCaster.Exhausted += () => _camera?.AddTrauma(0.4f);
+        RightCaster.Exhausted += () => _camera?.AddTrauma(0.4f);
+
+        var flashLayer = new CanvasLayer { Layer = 90 };
+        _flash = new ColorRect
+        {
+            Color = new Color(1, 1, 1, 0),
+            AnchorRight = 1, AnchorBottom = 1,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        flashLayer.AddChild(_flash);
+        AddChild(flashLayer);
 
         if (!ScriptedMode)
         {
@@ -82,6 +111,14 @@ public partial class BattleManager : Node2D
                 break;
 
             case BattleState.Ko:
+                _koTimer -= dt;
+                if (_koTimer <= 0f)
+                {
+                    Engine.TimeScale = _prevTimeScale;
+                    State = BattleState.Result;
+                }
+                break;
+
             case BattleState.Result:
                 break;
         }
@@ -97,9 +134,21 @@ public partial class BattleManager : Node2D
 
         float pushLeft = LeftCaster.ComputePush(RightCaster, ClashX);
         float pushRight = RightCaster.ComputePush(LeftCaster, 1f - ClashX);
+        _lastPushLeft = pushLeft;
+        _lastPushRight = pushRight;
+
         float escalation = 1f + Mathf.Max(0f, FightDuration - Tuning.EscalationStart) * Tuning.EscalationRatePerSec;
         ClashX += Tuning.ClashRate * escalation * (pushLeft - pushRight) * dt;
         ClashX = Mathf.Clamp(ClashX, 0f, 1f);
+
+        // Momentum-flip and overdrive-engage shakes.
+        int sign = Math.Sign(pushLeft - pushRight);
+        if (sign != 0 && _momentumSign != 0 && sign != _momentumSign) _camera?.AddTrauma(0.3f);
+        if (sign != 0) _momentumSign = sign;
+        if (LeftCaster.IsOverdriving && !_wasOverdrivingL) _camera?.AddTrauma(0.2f);
+        if (RightCaster.IsOverdriving && !_wasOverdrivingR) _camera?.AddTrauma(0.2f);
+        _wasOverdrivingL = LeftCaster.IsOverdriving;
+        _wasOverdrivingR = RightCaster.IsOverdriving;
 
         if (ClashX >= 1f - Tuning.LoseAt) EndBattle(0);
         else if (ClashX <= Tuning.LoseAt) EndBattle(1);
@@ -116,12 +165,76 @@ public partial class BattleManager : Node2D
     private void EndBattle(int winnerSide)
     {
         WinnerSide = winnerSide;
-        State = BattleState.Ko;
         LeftCaster.WantsChannel = false;
         RightCaster.WantsChannel = false;
         BattleEnded?.Invoke(winnerSide);
-        // KO presentation (slow-mo, flash, result panel) arrives with the visuals milestone.
-        State = BattleState.Result;
+
+        if (ScriptedMode || Game.Instance.SmokeMode)
+        {
+            State = BattleState.Result;
+            return;
+        }
+
+        // KO ceremony: slow-mo, white flash, loser dissolves, winner beam surges.
+        State = BattleState.Ko;
+        _prevTimeScale = Engine.TimeScale;
+        Engine.TimeScale = 0.3;
+        _koTimer = 0.9f;
+        _camera?.AddTrauma(1.0f);
+        if (_flash != null) _flash.Color = new Color(1, 1, 1, 0.85f);
+        var loser = winnerSide == 0 ? RightCaster : LeftCaster;
+        loser.GetNodeOrNull<CasterVisual>("Visual")?.StartDissolve();
+    }
+
+    public override void _Process(double delta)
+    {
+        float dt = (float)delta;
+        UpdateBeams(dt);
+
+        if (_flash != null && _flash.Color.A > 0f)
+            _flash.Color = new Color(1, 1, 1, Mathf.Max(0f, _flash.Color.A - dt * 1.2f));
+
+        if (!ScriptedMode && Input.IsActionJustPressed("debug_cycle"))
+        {
+            _debugCombo = (_debugCombo + 1) % 24;
+            LeftCaster.DebugSetCombo((Element)(_debugCombo % 8), (BeamType)(_debugCombo / 8));
+        }
+    }
+
+    private void UpdateBeams(float dt)
+    {
+        if (_leftBeam == null || _rightBeam == null) return;
+
+        Vector2 muzzleL = LeftCaster.ToGlobal(CasterVisual.MuzzleLocal);
+        Vector2 muzzleR = RightCaster.ToGlobal(CasterVisual.MuzzleLocal);
+        Vector2 clashPos = muzzleL.Lerp(muzzleR, ClashX);
+
+        _leftBeam.UpdateBeam(LeftCaster, muzzleL, clashPos, BeamIntensity(LeftCaster, 0), dt);
+        _rightBeam.UpdateBeam(RightCaster, muzzleR, clashPos, BeamIntensity(RightCaster, 1), dt);
+
+        if (_clash != null)
+        {
+            _clash.GlobalPosition = clashPos;
+            float combined = (_leftBeam.DisplayIntensity + _rightBeam.DisplayIntensity) * 0.4f;
+            float totalPush = _lastPushLeft + _lastPushRight;
+            float ratio = totalPush > 0.001f ? _lastPushRight / totalPush : 0.5f;
+            _clash.UpdateClash(LeftCaster.Style.Glow, RightCaster.Style.Glow, combined, ratio, dt);
+        }
+
+        // Constant low rumble while both beams are locked.
+        if (State == BattleState.Fighting && _leftBeam.DisplayIntensity > 0.3f && _rightBeam.DisplayIntensity > 0.3f)
+            _camera?.AddTrauma(0.35f * dt * (_leftBeam.DisplayIntensity + _rightBeam.DisplayIntensity) * 0.5f);
+    }
+
+    private float BeamIntensity(Caster caster, int side)
+    {
+        if (State is BattleState.Ko or BattleState.Result)
+            return WinnerSide == side ? 2.2f : 0f;
+        if (!caster.IsChanneling) return 0f;
+        float reform = caster.ReformTimer > 0f
+            ? Mathf.Lerp(1f, 0.3f, caster.ReformTimer / Tuning.ReformDuration)
+            : 1f;
+        return (caster.IsOverdriving ? 1.6f : 1f) * reform;
     }
 
     private void UpdateDebugLabel()

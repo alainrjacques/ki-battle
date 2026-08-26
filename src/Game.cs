@@ -14,6 +14,7 @@ public partial class Game : Node
 
     public bool SmokeMode { get; private set; }
     public bool SmokeFlowMode { get; private set; }
+    public bool ShotsMode { get; private set; }
 
     public override void _Ready()
     {
@@ -23,6 +24,7 @@ public partial class Game : Node
         {
             if (a == "--smoke") SmokeMode = true;
             if (a == "--smoke-flow") SmokeFlowMode = true;
+            if (a == "--shots") ShotsMode = true;
         }
         ElementDb.ValidateTable();
         GD.Print("boot ok");
