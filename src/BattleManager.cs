@@ -44,26 +44,39 @@ public partial class BattleManager : Node2D
         LeftCaster = GetNode<Caster>("PlayerCaster");
         RightCaster = GetNode<Caster>("EnemyCaster");
         _debugLabel = GetNodeOrNull<Label>("DebugLabel");
-        _leftBeam = GetNodeOrNull<Beam>("PlayerBeam");
-        _rightBeam = GetNodeOrNull<Beam>("EnemyBeam");
-        _clash = GetNodeOrNull<ClashPoint>("Clash");
-        _camera = GetNodeOrNull<BattleCamera>("BattleCamera");
+
+        // The headless dummy renderer crashes intermittently on particles/lights;
+        // visuals are meaningless there, so drop every visual node instead.
+        if (DisplayServer.GetName() == "headless")
+        {
+            foreach (string n in new[] { "PlayerBeam", "EnemyBeam", "Clash", "Background", "WorldEnvironment", "BattleCamera" })
+                GetNodeOrNull(n)?.QueueFree();
+            GetNodeOrNull("PlayerCaster/Visual")?.QueueFree();
+            GetNodeOrNull("EnemyCaster/Visual")?.QueueFree();
+        }
+        else
+        {
+            _leftBeam = GetNodeOrNull<Beam>("PlayerBeam");
+            _rightBeam = GetNodeOrNull<Beam>("EnemyBeam");
+            _clash = GetNodeOrNull<ClashPoint>("Clash");
+            _camera = GetNodeOrNull<BattleCamera>("BattleCamera");
+
+            var flashLayer = new CanvasLayer { Layer = 90 };
+            _flash = new ColorRect
+            {
+                Color = new Color(1, 1, 1, 0),
+                AnchorRight = 1, AnchorBottom = 1,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            flashLayer.AddChild(_flash);
+            AddChild(flashLayer);
+        }
 
         LeftCaster.Setup(Game.Instance.PlayerLoadout);
         RightCaster.Setup(Game.Instance.EnemyLoadout);
 
         LeftCaster.Exhausted += () => _camera?.AddTrauma(0.4f);
         RightCaster.Exhausted += () => _camera?.AddTrauma(0.4f);
-
-        var flashLayer = new CanvasLayer { Layer = 90 };
-        _flash = new ColorRect
-        {
-            Color = new Color(1, 1, 1, 0),
-            AnchorRight = 1, AnchorBottom = 1,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        flashLayer.AddChild(_flash);
-        AddChild(flashLayer);
 
         if (!ScriptedMode)
         {
