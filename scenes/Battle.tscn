@@ -1,0 +1,37 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/BattleManager.cs" id="1_bm"]
+[ext_resource type="Script" path="res://src/Caster.cs" id="2_caster"]
+
+[node name="Battle" type="Node2D"]
+script = ExtResource("1_bm")
+
+[node name="PlayerCaster" type="Node2D" parent="."]
+position = Vector2(200, 700)
+script = ExtResource("2_caster")
+Side = 0
+
+[node name="Placeholder" type="ColorRect" parent="PlayerCaster"]
+offset_left = -20.0
+offset_top = -100.0
+offset_right = 20.0
+offset_bottom = 20.0
+color = Color(0.3, 0.5, 1, 1)
+
+[node name="EnemyCaster" type="Node2D" parent="."]
+position = Vector2(1720, 700)
+script = ExtResource("2_caster")
+Side = 1
+
+[node name="Placeholder" type="ColorRect" parent="EnemyCaster"]
+offset_left = -20.0
+offset_top = -100.0
+offset_right = 20.0
+offset_bottom = 20.0
+color = Color(1, 0.4, 0.3, 1)
+
+[node name="DebugLabel" type="Label" parent="."]
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 900.0
+offset_bottom = 140.0
