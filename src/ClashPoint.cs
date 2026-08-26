@@ -9,7 +9,7 @@ namespace KiBattle;
 public partial class ClashPoint : Node2D
 {
     private ShaderMaterial _mat = null!;
-    private GpuParticles2D _sparksL = null!, _sparksR = null!;
+    private GpuParticles2D[] _sparksL = null!, _sparksR = null!; // [up fan, down fan]
     private PointLight2D _light = null!;
     private float _time;
 
@@ -28,12 +28,12 @@ public partial class ClashPoint : Node2D
         };
         AddChild(quad);
 
-        // Two spark streams, one per caster's color; the dominating side sprays
-        // its sparks through toward the loser.
-        _sparksL = MakeSparks(+1f);
-        _sparksR = MakeSparks(-1f);
-        AddChild(_sparksL);
-        AddChild(_sparksR);
+        // Per side: an up fan and a down fan (the splash spreads both ways along
+        // the interface); the dominating side sprays harder.
+        _sparksL = new[] { MakeSparks(+1f, -1f, 90), MakeSparks(+1f, +1f, 60) };
+        _sparksR = new[] { MakeSparks(-1f, -1f, 90), MakeSparks(-1f, +1f, 60) };
+        foreach (var s in _sparksL) AddChild(s);
+        foreach (var s in _sparksR) AddChild(s);
 
         _light = new PointLight2D
         {
@@ -51,14 +51,14 @@ public partial class ClashPoint : Node2D
     /// perpendicular to the beam, leaning past the clash toward the loser,
     /// arcing over under heavy gravity.
     /// </summary>
-    private static GpuParticles2D MakeSparks(float dirX) => new()
+    private static GpuParticles2D MakeSparks(float dirX, float dirY, int amount) => new()
     {
-        Amount = 90,
+        Amount = amount,
         Lifetime = 0.5,
         Texture = MakeStreakTexture(),
         ProcessMaterial = new ParticleProcessMaterial
         {
-            Direction = new Vector3(dirX * 0.35f, -1f, 0),
+            Direction = new Vector3(dirX * 0.35f, dirY, 0),
             Spread = 50f,
             InitialVelocityMin = 520f,
             InitialVelocityMax = 1250f,
@@ -96,8 +96,8 @@ public partial class ClashPoint : Node2D
     {
         _time += delta;
         Visible = intensity > 0.03f;
-        _sparksL.Emitting = intensity > 0.25f;
-        _sparksR.Emitting = intensity > 0.25f;
+        foreach (var s in _sparksL) s.Emitting = intensity > 0.25f;
+        foreach (var s in _sparksR) s.Emitting = intensity > 0.25f;
         if (!Visible) return;
 
         _mat.SetShaderParameter("color_a", leftGlow);
@@ -107,10 +107,16 @@ public partial class ClashPoint : Node2D
 
         // Winner's color dominates the spray; loser still spits a few sparks.
         float leftDom = 1f - ratio;
-        _sparksL.AmountRatio = 0.15f + 0.85f * Mathf.Pow(leftDom, 1.5f);
-        _sparksR.AmountRatio = 0.15f + 0.85f * Mathf.Pow(ratio, 1.5f);
-        _sparksL.Modulate = new Color(leftGlow.R * 1.9f, leftGlow.G * 1.9f, leftGlow.B * 1.9f);
-        _sparksR.Modulate = new Color(rightGlow.R * 1.9f, rightGlow.G * 1.9f, rightGlow.B * 1.9f);
+        foreach (var s in _sparksL)
+        {
+            s.AmountRatio = 0.15f + 0.85f * Mathf.Pow(leftDom, 1.5f);
+            s.Modulate = new Color(leftGlow.R * 1.9f, leftGlow.G * 1.9f, leftGlow.B * 1.9f);
+        }
+        foreach (var s in _sparksR)
+        {
+            s.AmountRatio = 0.15f + 0.85f * Mathf.Pow(ratio, 1.5f);
+            s.Modulate = new Color(rightGlow.R * 1.9f, rightGlow.G * 1.9f, rightGlow.B * 1.9f);
+        }
 
         _light.Color = leftGlow.Lerp(rightGlow, ratio);
         _light.Energy = intensity * (0.9f + 0.25f * Mathf.Sin(_time * 37f));
