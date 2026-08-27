@@ -53,6 +53,18 @@ public partial class DemoShots : Node
             GD.Print($"[shots] saved shot {i}");
             i++;
         }
+        // Timing bar: fresh state, catch the enemy mid element-switch with the
+        // cursor sweeping between the shatter and brace zones.
+        battle.ResetBattle();
+        battle.LeftCaster.WantsChannel = true;
+        battle.RightCaster.WantsChannel = true;
+        await WaitSeconds(0.4f);
+        bool switched = battle.RightCaster.TrySwitchElement(Element.Ice);
+        GD.Print($"[shots] timing switch accepted={switched}");
+        await WaitSeconds(0.5f);
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_timing_bar.png");
+        GD.Print("[shots] saved timing bar");
+
         // Power-tier contrast: left idles (base beam), right overdrives.
         battle.LeftCaster.DebugSetCombo(Element.Ice, BeamType.Single);
         battle.RightCaster.DebugSetCombo(Element.Fire, BeamType.Single);

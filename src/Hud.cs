@@ -49,6 +49,13 @@ public partial class Hud : CanvasLayer
     private float _coachHold;
     private int _coachPriority = 99;
 
+    // Timing bar (Easy): teaches WHEN to press during an enemy switch or flare
+    private Control _timingBar = null!;
+    private ColorRect _timingZoneShatter = null!, _timingZoneBrace = null!, _timingCursor = null!;
+    private Label _timingLabelShatter = null!, _timingLabelBrace = null!;
+    private bool _enemySwitchTimeline; // an element switch (gather seen), not a beam reform
+    private const float TimingW = 360f, TimingH = 6f;
+
     // Banners / result
     private Label _banner = null!;
     private PanelContainer _resultPanel = null!;
@@ -176,6 +183,24 @@ public partial class Hud : CanvasLayer
         _coach.AddThemeConstantOverride("outline_size", 7);
         _coach.Visible = false;
         AddChild(_coach);
+
+        // Timing bar under the coach line: ----|gold|----|red|-- with a sweeping
+        // cursor. Gold = switch now (shatter), red = hold SHIFT (brace at impact).
+        _timingBar = new Control { Position = new Vector2(960 - TimingW / 2, 1080 - 196), Visible = false };
+        _timingBar.AddChild(new ColorRect { Color = new Color(0, 0, 0, 0.7f), Position = new Vector2(-4, -4), Size = new Vector2(TimingW + 8, TimingH + 8) });
+        _timingBar.AddChild(new ColorRect { Color = new Color(0.35f, 0.35f, 0.4f), Size = new Vector2(TimingW, TimingH) });
+        _timingZoneShatter = new ColorRect { Color = new Color(1f, 0.85f, 0.35f, 0.95f), Size = new Vector2(0, TimingH) };
+        _timingZoneBrace = new ColorRect { Color = new Color(1f, 0.45f, 0.3f, 0.95f), Size = new Vector2(0, TimingH) };
+        _timingBar.AddChild(_timingZoneShatter);
+        _timingBar.AddChild(_timingZoneBrace);
+        _timingCursor = new ColorRect { Color = Colors.White, Size = new Vector2(4, TimingH + 12), Position = new Vector2(0, -6) };
+        _timingBar.AddChild(_timingCursor);
+        _timingLabelShatter = MakeLabel("SHATTER", 13, new Color(1f, 0.85f, 0.35f));
+        _timingLabelBrace = MakeLabel("BRACE", 13, new Color(1f, 0.45f, 0.3f));
+        _timingLabelShatter.Position = new Vector2(0, TimingH + 6);
+        _timingBar.AddChild(_timingLabelShatter);
+        _timingBar.AddChild(_timingLabelBrace);
+        AddChild(_timingBar);
     }
 
     private void BuildLoadoutStrip()
@@ -328,6 +353,7 @@ public partial class Hud : CanvasLayer
         UpdateTelegraph(dt);
         UpdateBannerAndResult(dt);
         UpdateCoach(dt);
+        UpdateTimingBar();
 
         if (_popupTime > 0f)
         {
@@ -520,9 +546,10 @@ public partial class Hud : CanvasLayer
         if (enemyIncoming)
             return (1, "INCOMING — too low on mana to brace, ride it out", danger);
 
-        // 2. Their switch is your shatter window.
+        // 2. Their switch is your shatter window — but ONLY during their gather:
+        // your entrance needs 0.9s of flight, so any later press lands too late.
         if (playerBusy == false && _player.PipReady && _player.ElementCooldown <= 0f
-            && (_enemy.GatherTimer > 0f || _enemy.SinceReformEnd < 0.8f))
+            && _enemy.GatherTimer > 0f)
             return (2, "SHATTER WINDOW — switch souls (1-8) to strike them mid-switch!", gold);
 
         // 3. Punish an exhausted enemy.
@@ -559,6 +586,64 @@ public partial class Hud : CanvasLayer
             return (12, "REACTION CHARGED — switch souls (1-8) to unleash it", gold);
 
         return null;
+    }
+
+    /// <summary>The when-to-press lesson: during an enemy element switch the bar
+    /// sweeps from their press (t=0) to their impact (t=0.9s). Gold opening zone =
+    /// counter-switch now and your entrance shatters them; red closing zone = hold
+    /// SHIFT so you are braced at the moment of impact. Also reused for Fire's
+    /// flare windup (brace zone only). Easy difficulty only, like the coach.</summary>
+    private void UpdateTimingBar()
+    {
+        if (Game.Instance.Difficulty != Difficulty.Easy || _battle.State != BattleState.Fighting)
+        {
+            _timingBar.Visible = false;
+            _enemySwitchTimeline = false;
+            return;
+        }
+
+        // Track whether the current enemy reform came from an element switch
+        // (a gather precedes it) — beam reforms get no bar: nothing is incoming.
+        if (_enemy.GatherTimer > 0f) _enemySwitchTimeline = true;
+        else if (_enemy.ReformTimer <= 0f) _enemySwitchTimeline = false;
+
+        float total, elapsed, shatterEnd, braceStart;
+        if (_enemySwitchTimeline)
+        {
+            total = Tuning.GatherDuration + Tuning.ElementReformDuration;
+            float remaining = _enemy.GatherTimer > 0f
+                ? _enemy.GatherTimer + Tuning.ElementReformDuration
+                : _enemy.ReformTimer;
+            elapsed = total - remaining;
+            shatterEnd = Tuning.GatherDuration / total; // press inside their gather
+            braceStart = 0.55f;                          // Shift held from here is braced at impact
+        }
+        else if (_enemy.CurrentElement == Element.Fire && _enemy.IsEmpowered
+                 && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup)
+        {
+            total = Tuning.FlareWindup;
+            elapsed = total - (Tuning.FlarePeriod - _enemy.FlareClock);
+            shatterEnd = -1f;
+            braceStart = 0.25f;
+        }
+        else
+        {
+            _timingBar.Visible = false;
+            return;
+        }
+
+        _timingBar.Visible = true;
+        bool hasShatter = shatterEnd > 0f;
+        _timingZoneShatter.Visible = _timingLabelShatter.Visible = hasShatter;
+        if (hasShatter)
+        {
+            _timingZoneShatter.Size = new Vector2(TimingW * shatterEnd, TimingH);
+            _timingLabelShatter.Position = new Vector2(0, TimingH + 6);
+        }
+        _timingZoneBrace.Position = new Vector2(TimingW * braceStart, 0);
+        _timingZoneBrace.Size = new Vector2(TimingW * (1f - braceStart), TimingH);
+        _timingLabelBrace.Position = new Vector2(TimingW * braceStart, TimingH + 6);
+        _timingCursor.Position = new Vector2(TimingW * Mathf.Clamp(elapsed / total, 0f, 1f) - 2, -6);
     }
 
     private void UpdateBannerAndResult(float dt)
