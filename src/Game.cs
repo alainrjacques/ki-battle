@@ -26,7 +26,7 @@ public partial class Game : Node
             if (a == "--smoke-flow") SmokeFlowMode = true;
             if (a == "--shots") ShotsMode = true;
         }
-        ElementDb.ValidateTable();
+        ElementDb.ValidateIdentities();
         GD.Print("boot ok");
     }
 }
@@ -35,15 +35,16 @@ public enum Difficulty { Easy, Normal, Hard }
 
 public enum AiPersonality { Aggressor, Miser, Trickster }
 
-/// <summary>A side's draft: 3 elements switchable in-fight, plus the starting beam type.</summary>
+/// <summary>A side's pre-fight choice: the keystone soul (starting element, free
+/// returns) and the starting beam type. All 8 elements are live in-fight.</summary>
 public struct Loadout
 {
-    public Element[] Elements;
+    public Element Keystone;
     public BeamType StartingBeam;
 
     public static Loadout Default() => new()
     {
-        Elements = new[] { Element.Fire, Element.Water, Element.Lightning },
+        Keystone = Element.Fire,
         StartingBeam = BeamType.Single,
     };
 }

@@ -21,18 +21,17 @@ public partial class FlowTest : Node
             var loadout = main.GetNodeOrNull<LoadoutScreen>("LoadoutScreen")
                 ?? throw new InvalidOperationException("LoadoutScreen not shown");
 
-            var picks = new[] { Element.Darkness, Element.Holy, Element.Ice };
-            loadout.DebugPickAndFight(picks, BeamType.Twin, Difficulty.Hard);
+            loadout.DebugPickAndFight(Element.Darkness, BeamType.Twin, Difficulty.Hard);
 
             await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
             var battle = main.GetNodeOrNull<BattleManager>("Battle")
                 ?? throw new InvalidOperationException("Battle not started after FIGHT");
 
-            if (!Equals(Game.Instance.PlayerLoadout.Elements[0], picks[0]) ||
+            if (Game.Instance.PlayerLoadout.Keystone != Element.Darkness ||
                 Game.Instance.PlayerLoadout.StartingBeam != BeamType.Twin)
                 throw new InvalidOperationException("player loadout not applied");
-            if (Game.Instance.EnemyLoadout.Elements.Length != 3)
-                throw new InvalidOperationException("AI did not draft");
+            if (battle.LeftCaster.CurrentElement != Element.Darkness)
+                throw new InvalidOperationException("keystone is not the starting element");
 
             while (battle.State == BattleState.Intro)
                 await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);

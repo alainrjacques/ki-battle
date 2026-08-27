@@ -6,17 +6,17 @@ using Godot;
 namespace KiBattle;
 
 /// <summary>
-/// Pre-battle draft: pick 3 of 8 elements (order = slots 1/2/3), a starting beam,
-/// and AI difficulty. The AI counter-drafts on FIGHT. UI is built in code.
+/// Pre-battle SOUL SELECT: pick one of 8 souls as your keystone (starting element,
+/// free returns home), a starting beam, and AI difficulty. All 8 souls are live
+/// in-fight on keys 1-8; each button doubles as the teaching surface for its soul.
 /// </summary>
 public partial class LoadoutScreen : Control
 {
-    private readonly List<Element> _picked = new();
+    private Element? _keystone;
     private BeamType _beam = BeamType.Single;
     private Difficulty _difficulty = Difficulty.Normal;
 
     private readonly Dictionary<Element, Button> _elementButtons = new();
-    private readonly Dictionary<Element, Label> _orderLabels = new();
     private Button[] _beamButtons = null!;
     private Button[] _diffButtons = null!;
     private Button _fight = null!;
@@ -37,9 +37,9 @@ public partial class LoadoutScreen : Control
         title.HorizontalAlignment = HorizontalAlignment.Center;
         box.AddChild(title);
 
-        box.AddChild(MakeLabel("Draft 3 elements — order becomes keys 1 / 2 / 3", 24, new Color(1, 1, 1, 0.7f)));
+        box.AddChild(MakeLabel("Choose your keystone soul — all 8 are yours in battle (keys 1-8), home is free", 24, new Color(1, 1, 1, 0.7f)));
 
-        // Element grid, 4 x 2
+        // Soul grid, 4 x 2; every button teaches its soul's passive and entrance.
         var grid = new GridContainer { Columns = 4 };
         grid.AddThemeConstantOverride("h_separation", 14);
         grid.AddThemeConstantOverride("v_separation", 14);
@@ -48,22 +48,28 @@ public partial class LoadoutScreen : Control
         foreach (Element e in Enum.GetValues<Element>())
         {
             var style = ElementDb.Style(e);
+            var soul = ElementDb.Soul(e);
             var b = new Button
             {
-                Text = style.DisplayName,
                 ToggleMode = true,
-                CustomMinimumSize = new Vector2(190, 64),
+                CustomMinimumSize = new Vector2(260, 104),
             };
-            b.AddThemeFontSizeOverride("font_size", 26);
             b.Modulate = style.Glow.Lightened(0.25f);
-            b.Toggled += pressed => OnElementToggled(e, pressed);
+            b.Toggled += pressed => OnKeystoneToggled(e, pressed);
             grid.AddChild(b);
             _elementButtons[e] = b;
 
-            var order = MakeLabel("", 20, Colors.White);
-            order.Position = new Vector2(8, 2);
-            b.AddChild(order);
-            _orderLabels[e] = order;
+            var stack = new VBoxContainer();
+            stack.SetAnchorsPreset(LayoutPreset.FullRect);
+            stack.OffsetLeft = 12; stack.OffsetTop = 6;
+            stack.MouseFilter = MouseFilterEnum.Ignore;
+            b.AddChild(stack);
+            var name = MakeLabel($"{style.DisplayName} — {soul.PassiveName}", 22, Colors.White);
+            var teach1 = MakeLabel(soul.TeachPassive, 14, new Color(1, 1, 1, 0.75f));
+            var teach2 = MakeLabel($"{soul.EntranceName}: {soul.TeachEntrance}", 14, new Color(1, 1, 1, 0.6f));
+            stack.AddChild(name);
+            stack.AddChild(teach1);
+            stack.AddChild(teach2);
         }
 
         // Beam selector
@@ -110,32 +116,19 @@ public partial class LoadoutScreen : Control
         return l;
     }
 
-    private void OnElementToggled(Element e, bool pressed)
+    private void OnKeystoneToggled(Element e, bool pressed)
     {
         if (pressed)
         {
-            if (_picked.Count >= 3)
-            {
-                _elementButtons[e].SetPressedNoSignal(false);
-                return;
-            }
-            _picked.Add(e);
+            _keystone = e;
+            foreach (var (other, button) in _elementButtons)
+                if (other != e) button.SetPressedNoSignal(false);
         }
-        else
+        else if (_keystone == e)
         {
-            _picked.Remove(e);
+            _keystone = null;
         }
-        RefreshOrderLabels();
-        _fight.Disabled = _picked.Count != 3;
-    }
-
-    private void RefreshOrderLabels()
-    {
-        foreach (var (e, label) in _orderLabels)
-        {
-            int idx = _picked.IndexOf(e);
-            label.Text = idx >= 0 ? $"{idx + 1}" : "";
-        }
+        _fight.Disabled = _keystone == null;
     }
 
     private void SelectBeam(BeamType t)
@@ -152,20 +145,20 @@ public partial class LoadoutScreen : Control
 
     private void StartFight()
     {
-        if (_picked.Count != 3) return;
+        if (_keystone == null) return;
         var game = Game.Instance;
         var rng = new Random();
         game.Difficulty = _difficulty;
         game.Personality = (AiPersonality)rng.Next(3);
-        game.PlayerLoadout = new Loadout { Elements = _picked.ToArray(), StartingBeam = _beam };
-        game.EnemyLoadout = AIController.Draft(game.PlayerLoadout.Elements, _difficulty, game.Personality, rng);
+        game.PlayerLoadout = new Loadout { Keystone = _keystone.Value, StartingBeam = _beam };
+        game.EnemyLoadout = AIController.Draft(_difficulty, game.Personality, rng);
         GetParent<Main>().StartBattle();
     }
 
     /// <summary>Flow-test hook: make the same choices a player would, then fight.</summary>
-    public void DebugPickAndFight(Element[] elements, BeamType beam, Difficulty difficulty)
+    public void DebugPickAndFight(Element keystone, BeamType beam, Difficulty difficulty)
     {
-        foreach (var e in elements) OnElementToggled(e, true);
+        OnKeystoneToggled(keystone, true);
         SelectBeam(beam);
         SelectDifficulty(difficulty);
         StartFight();

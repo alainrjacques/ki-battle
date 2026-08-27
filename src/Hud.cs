@@ -22,17 +22,26 @@ public partial class Hud : CanvasLayer
     private Label _exhaustL = null!, _exhaustR = null!;
     private const float ManaW = 420f, ManaH = 20f;
 
-    // Loadout strip
-    private readonly Control[] _elementIcons = new Control[3];
-    private readonly ColorRect[] _elementCooldown = new ColorRect[3];
+    // Soul strip (all 8 elements, keys 1-8)
+    private readonly Control[] _elementIcons = new Control[8];
+    private readonly ColorRect[] _elementCooldown = new ColorRect[8];
     private readonly Label[] _beamLabels = new Label[3];
     private ColorRect _beamCooldown = null!;
 
-    // Enemy telegraph
+    // Catalyst pips
+    private ColorRect _pipL = null!, _pipR = null!;
+
+    // Enemy telegraph / threat card
     private PanelContainer _telegraph = null!;
     private ColorRect _teleDiamond = null!;
-    private Label _teleElement = null!, _teleBeam = null!, _matchup = null!;
+    private Label _teleElement = null!, _teleBeam = null!, _threat = null!;
     private float _teleFlash;
+    private float _threatRefresh;
+
+    // Player debuff line + entrance popup
+    private Label _statusL = null!;
+    private Label _popup = null!;
+    private float _popupTime;
 
     // Banners / result
     private Label _banner = null!;
@@ -64,6 +73,17 @@ public partial class Hud : CanvasLayer
 
         _enemy.ElementChanged += _ => _teleFlash = 1f;
         _enemy.BeamTypeChanged += _ => _teleFlash = 1f;
+        _enemy.GatherStarted += _ => _teleFlash = 1f;
+        _battle.EntranceResolved += OnEntrance;
+    }
+
+    private void OnEntrance(int side, ImpactReport r)
+    {
+        var soul = ElementDb.Soul(r.Soul);
+        string who = side == 0 ? "" : "ENEMY ";
+        _popup.Text = $"{who}{soul.EntranceName}{(r.Shattered ? "  SHATTER!" : r.Braced ? "  braced" : "")}{(r.Charged ? "" : "  (weak)")}";
+        _popup.AddThemeColorOverride("font_color", r.Shattered ? new Color(1f, 0.9f, 0.3f) : ElementDb.Style(r.Soul).Glow);
+        _popupTime = 1.4f;
     }
 
     // ---------- construction ----------
@@ -121,38 +141,67 @@ public partial class Hud : CanvasLayer
         _exhaustR.Position = new Vector2(1920 - 60 - 130, 1080 - 96);
         _exhaustR.Visible = false;
         AddChild(_exhaustR);
+
+        // Catalyst pips: a diamond socket beside each mana bar. Both are public reads.
+        _pipL = new ColorRect { Size = new Vector2(22, 22), Position = new Vector2(60 + ManaW + 30, 1080 - 58), Rotation = Mathf.Pi / 4 };
+        _pipR = new ColorRect { Size = new Vector2(22, 22), Position = new Vector2(1920 - 60 - ManaW - 24, 1080 - 58), Rotation = Mathf.Pi / 4 };
+        AddChild(_pipL);
+        AddChild(_pipR);
+
+        // Player debuff line ("CONDUCTED", "OVERDRIVE LOCKED"...)
+        _statusL = MakeLabel("", 20, new Color(1f, 0.6f, 0.9f));
+        _statusL.Position = new Vector2(200, 1080 - 96);
+        AddChild(_statusL);
+
+        // Entrance popup, center screen
+        _popup = MakeLabel("", 40);
+        _popup.HorizontalAlignment = HorizontalAlignment.Center;
+        _popup.AnchorLeft = 0; _popup.AnchorRight = 1;
+        _popup.Position = new Vector2(0, 250);
+        _popup.Visible = false;
+        AddChild(_popup);
     }
 
     private void BuildLoadoutStrip()
     {
-        // Element slots 1/2/3
-        for (int i = 0; i < 3; i++)
+        // All 8 souls, keys 1-8; the keystone slot gets a gold ring.
+        for (int i = 0; i < 8; i++)
         {
-            var style = ElementDb.Style(_player.Loadout.Elements[i]);
-            var slot = new Control { Position = new Vector2(80 + i * 92, 1080 - 175), Size = new Vector2(64, 64) };
+            var style = ElementDb.Style((Element)i);
+            var slot = new Control { Position = new Vector2(72 + i * 72, 1080 - 168), Size = new Vector2(52, 52) };
 
+            if ((Element)i == _player.Keystone)
+            {
+                var ring = new ColorRect
+                {
+                    Color = new Color(1f, 0.85f, 0.35f),
+                    Size = new Vector2(42, 42),
+                    Position = new Vector2(26, -4),
+                    Rotation = Mathf.Pi / 4,
+                };
+                slot.AddChild(ring);
+            }
             var diamond = new ColorRect
             {
                 Color = style.Glow,
-                Size = new Vector2(44, 44),
-                Position = new Vector2(32, 0),
+                Size = new Vector2(34, 34),
+                Position = new Vector2(26, 0),
                 Rotation = Mathf.Pi / 4,
             };
             slot.AddChild(diamond);
 
-            var key = MakeLabel($"{i + 1}", 18, new Color(1, 1, 1, 0.8f));
-            key.Position = new Vector2(-2, -6);
+            var key = MakeLabel($"{i + 1}", 15, new Color(1, 1, 1, 0.8f));
+            key.Position = new Vector2(-4, -8);
             slot.AddChild(key);
 
-            var name = MakeLabel(ElementAbbrev[(int)_player.Loadout.Elements[i]], 16);
-            name.Position = new Vector2(12, 64);
+            var name = MakeLabel(ElementAbbrev[i], 12);
+            name.Position = new Vector2(8, 50);
             slot.AddChild(name);
 
             _elementCooldown[i] = new ColorRect
             {
                 Color = new Color(0, 0, 0, 0.65f),
-                Size = new Vector2(64, 0),
-                Position = new Vector2(0, 0),
+                Size = new Vector2(52, 0),
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
             slot.AddChild(_elementCooldown[i]);
@@ -161,18 +210,18 @@ public partial class Hud : CanvasLayer
             AddChild(slot);
         }
 
-        // Beam types Q/W/E, to the right of the element diamonds
+        // Beam types Q/W/E, to the right of the soul strip
         for (int i = 0; i < 3; i++)
         {
-            var l = MakeLabel($"{"QWE"[i]}  {BeamNames[i]}", 17, new Color(0.85f, 0.85f, 0.95f));
-            l.Position = new Vector2(420 + i * 150, 1080 - 168);
+            var l = MakeLabel($"{"QWE"[i]}  {BeamNames[i]}", 16, new Color(0.85f, 0.85f, 0.95f));
+            l.Position = new Vector2(700 + i * 140, 1080 - 164);
             _beamLabels[i] = l;
             AddChild(l);
         }
         _beamCooldown = new ColorRect
         {
             Color = new Color(0.15f, 0.15f, 0.2f, 0.9f),
-            Position = new Vector2(420, 1080 - 138),
+            Position = new Vector2(700, 1080 - 138),
             Size = new Vector2(0, 5),
         };
         AddChild(_beamCooldown);
@@ -199,8 +248,8 @@ public partial class Hud : CanvasLayer
         stack.AddChild(_teleBeam);
         row.AddChild(stack);
 
-        _matchup = MakeLabel("● EVEN", 24);
-        box.AddChild(_matchup);
+        _threat = MakeLabel("", 24);
+        box.AddChild(_threat);
 
         AddChild(_telegraph);
     }
@@ -262,6 +311,17 @@ public partial class Hud : CanvasLayer
         UpdateLoadoutStrip();
         UpdateTelegraph(dt);
         UpdateBannerAndResult(dt);
+
+        if (_popupTime > 0f)
+        {
+            _popupTime -= dt;
+            _popup.Visible = true;
+            _popup.Modulate = new Color(1, 1, 1, Mathf.Clamp(_popupTime / 0.5f, 0f, 1f));
+        }
+        else
+        {
+            _popup.Visible = false;
+        }
     }
 
     private void UpdateClashMeter()
@@ -297,26 +357,43 @@ public partial class Hud : CanvasLayer
 
     private void UpdateLoadoutStrip()
     {
-        for (int i = 0; i < 3; i++)
+        Element pending = _player.GatherTimer > 0f ? _player.PendingElement : _player.CurrentElement;
+        for (int i = 0; i < 8; i++)
         {
-            bool active = i == _player.ElementSlot;
-            _elementIcons[i].Scale = Vector2.One * (active ? 1.18f : 0.95f);
-            _elementIcons[i].Modulate = active ? Colors.White : new Color(1, 1, 1, 0.55f);
+            bool active = (Element)i == _player.CurrentElement;
+            bool incoming = _player.GatherTimer > 0f && (Element)i == pending;
+            _elementIcons[i].Scale = Vector2.One * (active || incoming ? 1.2f : 0.9f);
+            _elementIcons[i].Modulate = active || incoming ? Colors.White : new Color(1, 1, 1, 0.5f);
 
             float cd = active ? 0f : _player.ElementCooldown / Tuning.ElementSwitchCooldown;
-            _elementCooldown[i].Size = new Vector2(64, 64 * cd);
+            _elementCooldown[i].Size = new Vector2(52, 52 * cd);
         }
         for (int i = 0; i < 3; i++)
         {
             bool active = (int)_player.Beam == i;
             _beamLabels[i].Modulate = active ? Colors.White : new Color(1, 1, 1, 0.45f);
         }
-        _beamCooldown.Size = new Vector2(440 * _player.BeamCooldown / Tuning.BeamSwitchCooldown, 5);
+        _beamCooldown.Size = new Vector2(400 * _player.BeamCooldown / Tuning.BeamSwitchCooldown, 5);
+
+        UpdatePip(_pipL, _player);
+        UpdatePip(_pipR, _enemy);
+
+        _statusL.Text = _player.ConductTimer > 0f ? "CONDUCTED!"
+            : _player.OverdriveLockTimer > 0f ? "OVERDRIVE LOCKED"
+            : _player.PurgeImmunityTimer > 0f ? "IMMUNE"
+            : "";
+    }
+
+    private static void UpdatePip(ColorRect pip, Caster caster)
+    {
+        float t = caster.PipCharge / Tuning.PipChargeTime;
+        pip.Color = caster.PipReady
+            ? new Color(1f, 0.85f, 0.3f, 0.75f + 0.25f * Mathf.Sin((float)Time.GetTicksMsec() / 90f))
+            : new Color(0.35f + 0.4f * t, 0.32f + 0.3f * t, 0.25f, 0.8f);
     }
 
     private Element _lastTeleElement = (Element)(-1);
     private BeamType _lastTeleBeam = (BeamType)(-1);
-    private int _lastMatchState = -99;
 
     private void UpdateTelegraph(float dt)
     {
@@ -334,25 +411,40 @@ public partial class Hud : CanvasLayer
         _teleFlash = Mathf.Max(0f, _teleFlash - dt * 2.5f);
         _telegraph.Modulate = new Color(1 + _teleFlash * 2f, 1 + _teleFlash * 2f, 1 + _teleFlash * 2f);
 
-        bool anyPinpoint = _player.Beam == BeamType.Pinpoint || _enemy.Beam == BeamType.Pinpoint;
-        float m = ElementDb.EffectiveMultiplier(_player.CurrentElement, _enemy.CurrentElement, anyPinpoint);
-        int state = m > 1.05f ? 1 : m < 0.95f ? -1 : 0;
-        if (state == _lastMatchState) return;
-        _lastMatchState = state;
-        switch (state)
+        // Threat line: the single read that carries the timing game. Rebuilt at
+        // most 10x/s — it contains live countdowns.
+        _threatRefresh -= dt;
+        if (_threatRefresh > 0f) return;
+        _threatRefresh = 0.1f;
+
+        string threat;
+        Color color;
+        if (_enemy.GatherTimer > 0f || (_enemy.ReformTimer > 0f && _enemy.GatherTimer <= 0f))
         {
-            case 1:
-                _matchup.Text = "▲ ADVANTAGE";
-                _matchup.AddThemeColorOverride("font_color", new Color(0.4f, 1f, 0.4f));
-                break;
-            case -1:
-                _matchup.Text = "▼ COUNTERED";
-                _matchup.AddThemeColorOverride("font_color", new Color(1f, 0.4f, 0.35f));
-                break;
-            default:
-                _matchup.Text = "● EVEN";
-                _matchup.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.85f));
-                break;
+            var incoming = ElementDb.Style(_enemy.GatherTimer > 0f ? _enemy.PendingElement : _enemy.CurrentElement);
+            threat = $"!! INCOMING: {incoming.DisplayName.ToUpper()}";
+            color = new Color(1f, 0.55f, 0.25f);
+        }
+        else
+        {
+            (threat, color) = _enemy.CurrentElement switch
+            {
+                Element.Fire when _enemy.FlareActiveTimer > 0f => ("FLARING!", new Color(1f, 0.5f, 0.2f)),
+                Element.Fire when _enemy.IsEmpowered && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup
+                    => ($"FLARE IN {Tuning.FlarePeriod - _enemy.FlareClock:0.0}s", new Color(1f, 0.7f, 0.3f)),
+                Element.Lightning when _enemy.CritActiveTimer > 0f => ("CRIT!", new Color(0.8f, 0.95f, 1f)),
+                Element.Lightning when _enemy.CritArmed => ("CRIT ARMED", new Color(0.7f, 0.9f, 1f)),
+                Element.Poison when _enemy.Stacks > 0 => ($"{_enemy.Stacks} STACKS +{_enemy.Stacks * 2}%", new Color(0.6f, 0.95f, 0.3f)),
+                Element.Darkness when _enemy.DominanceTime >= Tuning.DominanceWindow => ("LEECHING YOU", new Color(0.8f, 0.4f, 1f)),
+                Element.Ice when _enemy.DominanceTime >= Tuning.DominanceWindow => ("FROSTING YOUR COOLDOWNS", new Color(0.5f, 0.85f, 1f)),
+                _ => ("", Colors.White),
+            };
+            if (_enemy.PipReady) threat = threat.Length > 0 ? threat + "  ◆ PIP" : "◆ PIP CHARGED";
+        }
+        if (threat != _threat.Text)
+        {
+            _threat.Text = threat;
+            _threat.AddThemeColorOverride("font_color", color);
         }
     }
 

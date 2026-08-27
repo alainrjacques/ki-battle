@@ -12,9 +12,11 @@ public partial class PlayerController : Node
         Target.WantsChannel = Input.IsActionPressed("channel");
         Target.WantsOverdrive = Input.IsActionPressed("overdrive");
 
-        if (Input.IsActionJustPressed("element_1")) Target.TrySwitchElement(0);
-        if (Input.IsActionJustPressed("element_2")) Target.TrySwitchElement(1);
-        if (Input.IsActionJustPressed("element_3")) Target.TrySwitchElement(2);
+        for (int i = 0; i < ElementDb.Count; i++)
+        {
+            if (Input.IsActionJustPressed($"element_{i + 1}"))
+                Target.TrySwitchElement((Element)i);
+        }
 
         if (Input.IsActionJustPressed("beam_single")) Target.TrySwitchBeam(BeamType.Single);
         if (Input.IsActionJustPressed("beam_twin")) Target.TrySwitchBeam(BeamType.Twin);
