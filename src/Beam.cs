@@ -8,7 +8,7 @@ namespace KiBattle;
 /// </summary>
 public partial class Beam : Node2D
 {
-    private Line2D _line = null!;
+    private MeshInstance2D _quad = null!;
     private ShaderMaterial _mat = null!;
     private float _displayIntensity;
     private int _appliedStyle = -1;
@@ -26,19 +26,25 @@ public partial class Beam : Node2D
 
         _mat = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/beam.gdshader") };
 
-        // Line2D stretch UVs require an assigned texture; a 1x1 white pixel suffices.
-        var img = Image.CreateEmpty(1, 1, false, Image.Format.Rgba8);
-        img.Fill(Colors.White);
-
-        _line = new Line2D
+        // One explicit unit quad (scaled to length x 150 px each frame): UV.x is
+        // guaranteed continuous 0..1 across the whole beam. Line2D tessellation
+        // produced UV discontinuities that read as vertical tearing seams.
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = new Vector2[]
         {
-            Width = 150f,
-            TextureMode = Line2D.LineTextureMode.Stretch,
-            Texture = ImageTexture.CreateFromImage(img),
-            Material = _mat,
-            Points = new[] { Vector2.Zero, Vector2.Right * 100f },
+            new(-0.5f, -0.5f), new(0.5f, -0.5f), new(0.5f, 0.5f), new(-0.5f, 0.5f),
         };
-        AddChild(_line);
+        arrays[(int)Mesh.ArrayType.TexUV] = new Vector2[]
+        {
+            new(0, 0), new(1, 0), new(1, 1), new(0, 1),
+        };
+        arrays[(int)Mesh.ArrayType.Index] = new[] { 0, 1, 2, 0, 2, 3 };
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+
+        _quad = new MeshInstance2D { Mesh = mesh, Material = _mat };
+        AddChild(_quad);
         Visible = false;
     }
 
@@ -52,8 +58,9 @@ public partial class Beam : Node2D
         Visible = _displayIntensity > 0.02f;
         if (!Visible) return;
 
-        _line.SetPointPosition(0, from);
-        _line.SetPointPosition(1, to);
+        _quad.GlobalPosition = (from + to) * 0.5f;
+        _quad.GlobalRotation = (to - from).Angle();
+        _quad.Scale = new Vector2(from.DistanceTo(to), 150f);
 
         // Style uniforms only change on an element/beam switch; don't re-marshal them at 60 fps.
         var style = caster.Style;

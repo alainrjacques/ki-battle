@@ -114,4 +114,5 @@ debug_cycle={
 [rendering]
 
 viewport/hdr_2d=true
+environment/glow/upscale_mode=1
 environment/defaults/default_clear_color=Color(0.02, 0.02, 0.04, 1)

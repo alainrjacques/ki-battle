@@ -25,7 +25,9 @@ float hash21(vec2 p) {
 float vnoise(vec2 p) {
 	vec2 i = floor(p);
 	vec2 f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
+	// Quintic interpolation: C2-continuous, so hard thresholds and bloom don't
+	// expose the cell grid as vertical/horizontal creases.
+	f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 	float a = hash21(i);
 	float b = hash21(i + vec2(1.0, 0.0));
 	float c = hash21(i + vec2(0.0, 1.0));
@@ -37,16 +39,56 @@ float fbm(vec2 p) {
 	return 0.55 * vnoise(p) + 0.30 * vnoise(p * 2.13) + 0.15 * vnoise(p * 4.71);
 }
 
-// Piecewise-LINEAR 1D noise: sharp kinks, the backbone of the lightning bolts.
-float lin1d(float x, float s) {
+// Piecewise-LINEAR 1D noise with its derivative: value in .x, d/dx in .y.
+// Sharp kinks are the backbone of the lightning bolts; the derivative lets the
+// renderer measure PERPENDICULAR distance to the path, so steep segments draw
+// at full thickness instead of thinning into apparent breaks (tearing).
+vec2 lin1dg(float x, float s) {
 	float i = floor(x);
 	float f = fract(x);
-	return mix(hash21(vec2(i, s)), hash21(vec2(i + 1.0, s)), f) * 2.0 - 1.0;
+	float a = hash21(vec2(i, s)) * 2.0 - 1.0;
+	float b = hash21(vec2(i + 1.0, s)) * 2.0 - 1.0;
+	return vec2(mix(a, b, f), b - a);
 }
 
-// Two octaves of kinked displacement = a jagged bolt path.
-float jag(float x, float s) {
-	return lin1d(x * 3.0, s) * 0.7 + lin1d(x * 9.0, s + 5.1) * 0.3;
+// Two octaves of kinked displacement = a jagged bolt path (value, d/dx).
+vec2 jagg(float x, float s) {
+	vec2 c0 = lin1dg(x * 3.0, s);
+	vec2 c1 = lin1dg(x * 9.0, s + 5.1);
+	return vec2(c0.x * 0.7 + c1.x * 0.3, c0.y * 2.1 + c1.y * 2.7);
+}
+
+// The bolt's center height at pattern-x. Between fine-octave knots this is
+// exactly linear, so the path is a polyline with knots every 1/(9*xscale).
+float boltC(float xs, float bs, float xscale, float amp, float env, float helixSign, float ws, float t) {
+	float c = 0.5 + jagg(xs * xscale, bs).x * amp * env;
+	if (helixSign != 0.0) c += helixSign * 0.16 * ws * sin(xs * helix_freq + t * 2.0);
+	return c;
+}
+
+float segDist(vec2 p, vec2 a, vec2 b) {
+	vec2 ab = b - a;
+	float h = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+	return length(p - a - ab * h);
+}
+
+// TRUE distance (in UV.y units) from this pixel to the bolt polyline: exact
+// point-to-segment distance over the 3 nearest segments. Uniform thickness on
+// steep runs and corners alike — no tearing by construction. Pixel space is
+// 240 px per pattern-x unit and 150 px across the quad.
+float boltDist(float x, float bs, float xscale, float amp, float env, float y, float helixSign, float ws, float t) {
+	float cell = 1.0 / (9.0 * xscale);
+	float x0 = (floor(x * xscale * 9.0) - 1.0) * cell;
+	vec2 p = vec2(x * 240.0, y * 150.0);
+	vec2 prev = vec2(x0 * 240.0, boltC(x0, bs, xscale, amp, env, helixSign, ws, t) * 150.0);
+	float d = 1e6;
+	for (int k = 1; k <= 3; k++) {
+		float xk = x0 + float(k) * cell;
+		vec2 cur = vec2(xk * 240.0, boltC(xk, bs, xscale, amp, env, helixSign, ws, t) * 150.0);
+		d = min(d, segDist(p, prev, cur));
+		prev = cur;
+	}
+	return d / 150.0;
 }
 
 void fragment() {
@@ -72,9 +114,21 @@ void fragment() {
 	}
 	center += wobble_amp * n * widthScale;
 
+	// Center-line slope (px/px) via finite difference, so every profile can use
+	// PERPENDICULAR distance: steep wobble sections keep their true thickness
+	// instead of thinning into apparent breaks (tearing). 0.625 = 150 px quad
+	// height / 240 px per pattern-x unit.
+	float hfd = 0.06;
+	float nR = fbm(vec2((x + hfd) * noise_scale * 0.35 - t * scroll_speed, seed * 7.3)) - 0.5;
+	float nL = fbm(vec2((x - hfd) * noise_scale * 0.35 - t * scroll_speed, seed * 7.3)) - 0.5;
+	if (style == 1) { nR = floor(nR * 6.0) / 6.0; nL = floor(nL * 6.0) / 6.0; }
+	if (style == 6 || style == 7) { nR *= 0.15; nL *= 0.15; }
+	float centerSlope = wobble_amp * (nR - nL) / (2.0 * hfd) * widthScale * 0.625;
+	if (style == 2) centerSlope += 0.05 * 3.0 * cos(x * 3.0 - t * 2.2) * widthScale * 0.625;
+
 	// --- Beam profile ---
 	float profile = 0.0;
-	float d = abs(y - center);
+	float d = abs(y - center) / sqrt(1.0 + centerSlope * centerSlope);
 	if (beam_type == 0) { // Single: broad steady band
 		float hw = 0.36 * widthScale;
 		profile = pow(smoothstep(hw, 0.0, d), 1.6);
@@ -82,11 +136,16 @@ void fragment() {
 		float amp = 0.20 * widthScale;
 		float phase = x * helix_freq + t * 2.0;
 		float s = sin(phase);
+		float helixSlope = amp * helix_freq * cos(phase) * 0.625;
+		float slA = centerSlope + helixSlope;
+		float slB = centerSlope - helixSlope;
 		float cA = center + amp * s;
 		float cB = center - amp * s;
 		float w = 0.075 * widthScale;
-		float strandA = exp(-pow(abs(y - cA) / w, 2.0));
-		float strandB = exp(-pow(abs(y - cB) / w, 2.0));
+		float dA = abs(y - cA) / sqrt(1.0 + slA * slA);
+		float dB = abs(y - cB) / sqrt(1.0 + slB * slB);
+		float strandA = exp(-pow(dA / w, 2.0));
+		float strandB = exp(-pow(dB / w, 2.0));
 		float rung = smoothstep(0.18, 0.0, abs(s)) * smoothstep(amp + w, 0.0, abs(y - center)) * 0.55;
 		profile = clamp(strandA + strandB + rung, 0.0, 1.6);
 	} else { // Pinpoint: razor ray with travelling pulse packets
@@ -112,18 +171,15 @@ void fragment() {
 		for (int b = 0; b < 2; b++) {
 			if (b >= mains) { break; }
 			float bs = tq + float(b) * 17.3;
-			float c = 0.5 + jag(x, bs) * boltAmp * env;
-			if (beam_type == 1) { // twin: two bolts spiralling around each other
-				c += (b == 0 ? 1.0 : -1.0) * 0.16 * widthScale * sin(x * helix_freq + t * 2.0);
-			}
-			float dm = abs(y - c);
+			float helixSign = beam_type == 1 ? (b == 0 ? 1.0 : -1.0) : 0.0;
+			float dm = boltDist(x, bs, 1.0, boltAmp, env, y, helixSign, widthScale, t);
 			profile += smoothstep(mainW, 0.0, dm) * 1.15   // hot white core
 			         + smoothstep(0.10, 0.0, dm) * 0.22;   // soft haze hugging the bolt
 		}
 		for (int b = 0; b < 3; b++) { // stray branches, wider wander, faint
 			float bs = tq + 31.7 + float(b) * 7.9;
-			float c = 0.5 + jag(x * 1.4, bs) * boltAmp * 1.5 * env;
-			profile += smoothstep(0.011, 0.0, abs(y - c)) * 0.32;
+			float dm = boltDist(x, bs, 1.4, boltAmp * 1.5, env, y, 0.0, widthScale, t);
+			profile += smoothstep(0.011, 0.0, dm) * 0.32;
 		}
 		profile = clamp(profile, 0.0, 1.4);
 		bright *= 0.85 + 0.4 * hash21(vec2(tq, seed)); // flicker per re-seed
@@ -141,7 +197,7 @@ void fragment() {
 	if (style == 5) { // Poison: drifting bubbles inside the beam
 		float b = vnoise(vec2(x * 3.0 - t * 0.9, y * 7.0 + seed));
 		float inside = smoothstep(0.3, 0.15, d);
-		profile += smoothstep(0.62, 0.78, b) * inside * 0.9;
+		profile += smoothstep(0.58, 0.84, b) * inside * 0.9;
 	}
 	if (style == 6) { // Holy: travelling halo rings
 		float r = fract(x * 1.1 - t * 1.4);
@@ -172,5 +228,7 @@ void fragment() {
 		col += rainbow * edge * 1.4 * bright;
 	}
 
-	COLOR = vec4(col * fadeIn * clashEnd, 1.0);
+	// Cap the HDR peak: extreme values dump so much energy into the glow mips
+	// that their upsampling blocks become visible as vertical seams.
+	COLOR = vec4(min(col * fadeIn * clashEnd, vec3(4.0)), 1.0);
 }
