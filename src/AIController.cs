@@ -42,6 +42,7 @@ public partial class AIController : Node
     // Gather perception: the incoming-entrance channel.
     private bool _sawGather;
     private float _gatherNoticeTimer = -1f;
+    private float _braceDelay;
     private float _braceHold;
     private bool _panicDodged;
     private bool _recovering; // resting until mana recovers — the drain-rest rhythm
@@ -127,20 +128,31 @@ public partial class AIController : Node
         if (_gatherNoticeTimer >= 0f && (_gatherNoticeTimer -= dt) < 0f && incoming)
             OnPerceivedIncoming();
 
+        // A scheduled brace engages late — overdrive only through the impact
+        // window itself, like the timing bar teaches — not from perception on.
+        if (_braceDelay > 0f && (_braceDelay -= dt) <= 0f)
+            _braceHold = 0.55f;
         _braceHold = Mathf.Max(0f, _braceHold - dt);
     }
 
-    /// <summary>The AI has just perceived an incoming entrance. Hard braces (never
-    /// dodges — it knows the vulnerability trap); Normal panic-dodges 15% of the time.</summary>
+    /// <summary>The AI has just perceived an incoming entrance. Hard always braces
+    /// a charged one (and never dodges — it knows the vulnerability trap); Normal
+    /// defends the tail end ~40% of the time and panic-dodges 15%; Easy eats it.</summary>
     private void OnPerceivedIncoming()
     {
         _gatherNoticeTimer = -1f;
-        bool worthDefending = Opponent.PipReady || Opponent.EntranceEligible(Opponent.PendingElement);
+        // Only a charged entrance is worth the overdrive mana a brace costs;
+        // uncharged shoves and pipless switches are noise.
+        bool worthDefending = Opponent.IncomingEntranceCharged;
+        bool canBrace = worthDefending && Target.Mana > 35f;
 
-        if (Difficulty == Difficulty.Hard && worthDefending && Target.Mana > 35f)
+        if (canBrace && (Difficulty == Difficulty.Hard
+                         || (Difficulty == Difficulty.Normal && _rng.NextDouble() < 0.4)))
         {
-            // Brace: hold overdrive through the impact window.
-            _braceHold = Opponent.GatherTimer + Opponent.ReformTimer + 0.3f;
+            // Schedule a LATE brace: overdriving from perception to impact costs
+            // ~3x what the halved shove is worth; only the impact window pays.
+            float timeToImpact = Opponent.GatherTimer + Opponent.ReformTimer;
+            _braceDelay = Mathf.Max(0.001f, timeToImpact - 0.4f);
         }
         else if (Difficulty == Difficulty.Normal && !_panicDodged && _rng.NextDouble() < 0.15)
         {
@@ -263,7 +275,11 @@ public partial class AIController : Node
         // mid-switch is a shatter target worth spending on.
         bool oppVulnerable = Opponent.GatherTimer > 0f || Opponent.ReformTimer > 0f;
         float pipBonus = Target.PipReady ? 0.3f : -0.2f;
-        float shatterHunt = Target.PipReady && oppVulnerable && Difficulty == Difficulty.Hard ? 0.6f : 0f;
+        // NO reactive shatter hunting: an entrance needs 0.9s of flight, so a
+        // switch made after perceiving their gather lands AFTER their
+        // vulnerability ends — while making US vulnerable exactly when their
+        // entrance arrives. While their fire is in flight, switching is suicide.
+        float incomingPenalty = Opponent.IncomingEntrancePending ? -0.6f : 0f;
 
         float best = force ? float.MinValue : SwitchThreshold;
         Element bestSoul = Target.CurrentElement;
@@ -290,8 +306,8 @@ public partial class AIController : Node
                 _ => 0f,
             };
 
-            float score = fit + switchBias
-                        + (Target.EntranceEligible(e) ? pipBonus + shatterHunt : -0.3f)
+            float score = fit + switchBias + incomingPenalty
+                        + (Target.EntranceEligible(e) ? pipBonus : -0.3f)
                         + (e == Target.Keystone ? 0.1f : 0f);
             if (score > best) { best = score; bestSoul = e; }
         }

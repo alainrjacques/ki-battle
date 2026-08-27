@@ -100,7 +100,17 @@ public partial class Caster : Node2D
         CooldownRate = 1f;
         Array.Fill(_echoTimer, 0f);
         WantsChannel = WantsOverdrive = false;
+        // Entrance-in-flight state must die with the old fight, or a battle that
+        // ends mid-switch leaks a phantom (possibly charged) entrance into the next.
+        _entrancePending = _entranceCharged = _impactReady = _wasOverdriving = false;
+        PendingElement = CurrentElement;
     }
+
+    /// <summary>True while a switch that will fire an entrance is in flight — the
+    /// public telegraph. Beam reforms, keystone returns, and echo switches are NOT
+    /// incoming entrances; HUD, coach, and AI must all read this, not ReformTimer.</summary>
+    public bool IncomingEntrancePending => (GatherTimer > 0f || ReformTimer > 0f) && _entrancePending;
+    public bool IncomingEntranceCharged => IncomingEntrancePending && _entranceCharged;
 
     public float SwitchCost(Element e) =>
         e == Keystone ? Tuning.KeystoneReturnCost :
@@ -285,7 +295,9 @@ public partial class Caster : Node2D
     // --- helpers used by entrance/leech resolution ---
     public void BurnMana(float amount)
     {
-        Mana = Mathf.Max(Tuning.ManaOpFloor, Mana - amount);
+        // The floor stops burns, it never refills: a victim already below it is untouched.
+        if (Mana > Tuning.ManaOpFloor)
+            Mana = Mathf.Max(Tuning.ManaOpFloor, Mana - amount);
     }
 
     public void GainMana(float amount) => Mana = Mathf.Min(Tuning.ManaMax, Mana + amount);

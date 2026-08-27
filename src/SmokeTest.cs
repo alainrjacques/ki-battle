@@ -217,11 +217,11 @@ public partial class SmokeTest : Node
 
     private async Task<(int winner, float duration)> RunAiBattle(Difficulty leftDiff, Difficulty rightDiff)
     {
-        var rng = new Random();
-        var leftLoadout = AIController.Draft(leftDiff, AiPersonality.Trickster, rng);
-        var rightLoadout = AIController.Draft(rightDiff, AiPersonality.Aggressor, rng);
-
-        var battle = await SpawnBattle(leftLoadout, rightLoadout);
+        // Mirror loadouts and personalities (AttachAi uses Aggressor for both):
+        // difficulty must be the ONLY variable, or keystone/personality draft
+        // luck swamps the Hard-vs-Easy signal across a 10-fight sample.
+        var loadout = MakeLoadout(Element.Fire);
+        var battle = await SpawnBattle(loadout, loadout);
         var aiL = AttachAi(battle, battle.LeftCaster, battle.RightCaster, leftDiff);
         var aiR = AttachAi(battle, battle.RightCaster, battle.LeftCaster, rightDiff);
 

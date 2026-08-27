@@ -343,6 +343,15 @@ public partial class Hud : CanvasLayer
     {
         if (!_built)
         {
+            // Headless: never build or subscribe. BattleManager queue-frees this
+            // node, but a zero-physics-step first frame can still run _Process
+            // once — subscribing events here would leave freed Labels wired to
+            // the (suite-shared) battle and throw on the next entrance.
+            if (DisplayServer.GetName() == "headless")
+            {
+                SetProcess(false);
+                return;
+            }
             Build();
             _built = true;
         }
@@ -408,7 +417,8 @@ public partial class Hud : CanvasLayer
             _elementIcons[i].Scale = Vector2.One * (active || incoming ? 1.2f : 0.9f);
             _elementIcons[i].Modulate = active || incoming ? Colors.White : new Color(1, 1, 1, 0.5f);
 
-            float cd = active ? 0f : _player.ElementCooldown / Tuning.ElementSwitchCooldown;
+            // Clamp: Glaciate pushes live cooldowns past the base constant.
+            float cd = active ? 0f : Mathf.Min(1f, _player.ElementCooldown / Tuning.ElementSwitchCooldown);
             _elementCooldown[i].Size = new Vector2(52, 52 * cd);
         }
         for (int i = 0; i < 3; i++)
@@ -416,7 +426,7 @@ public partial class Hud : CanvasLayer
             bool active = (int)_player.Beam == i;
             _beamLabels[i].Modulate = active ? Colors.White : new Color(1, 1, 1, 0.45f);
         }
-        _beamCooldown.Size = new Vector2(400 * _player.BeamCooldown / Tuning.BeamSwitchCooldown, 5);
+        _beamCooldown.Size = new Vector2(400 * Mathf.Min(1f, _player.BeamCooldown / Tuning.BeamSwitchCooldown), 5);
 
         UpdatePip(_pipL, _player);
         UpdatePip(_pipR, _enemy);
@@ -462,7 +472,7 @@ public partial class Hud : CanvasLayer
 
         string threat;
         Color color;
-        if (_enemy.GatherTimer > 0f || (_enemy.ReformTimer > 0f && _enemy.GatherTimer <= 0f))
+        if (_enemy.IncomingEntrancePending)
         {
             var incoming = ElementDb.Style(_enemy.GatherTimer > 0f ? _enemy.PendingElement : _enemy.CurrentElement);
             threat = $"!! INCOMING: {incoming.DisplayName.ToUpper()}";
@@ -537,12 +547,13 @@ public partial class Hud : CanvasLayer
         var gold = new Color(1f, 0.85f, 0.35f);
         var calm = new Color(0.55f, 0.85f, 1f);
 
-        bool enemyIncoming = _enemy.GatherTimer > 0f || _enemy.ReformTimer > 0f;
+        bool enemyIncoming = _enemy.IncomingEntrancePending;
         bool playerBusy = _player.GatherTimer > 0f || _player.ReformTimer > 0f;
 
-        // 1. React to an incoming entrance: brace.
+        // 1. React to an incoming entrance: brace. (Beam reforms, keystone
+        // returns and echo switches fire no entrance — never cry wolf on them.)
         if (enemyIncoming && _player.Mana > 25f)
-            return (1, "INCOMING — hold SHIFT to BRACE (halves the hit)", danger);
+            return (1, "INCOMING — hold SPACE + SHIFT to BRACE (halves the hit)", danger);
         if (enemyIncoming)
             return (1, "INCOMING — too low on mana to brace, ride it out", danger);
 
@@ -616,7 +627,9 @@ public partial class Hud : CanvasLayer
                 : _enemy.ReformTimer;
             elapsed = total - remaining;
             shatterEnd = Tuning.GatherDuration / total; // press inside their gather
-            braceStart = 0.55f;                          // Shift held from here is braced at impact
+            // Brace only matters when a real entrance is coming — keystone
+            // returns and echo switches land nothing worth halving.
+            braceStart = _enemy.IncomingEntrancePending ? 0.55f : -1f;
         }
         else if (_enemy.CurrentElement == Element.Fire && _enemy.IsEmpowered
                  && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup)
@@ -640,9 +653,14 @@ public partial class Hud : CanvasLayer
             _timingZoneShatter.Size = new Vector2(TimingW * shatterEnd, TimingH);
             _timingLabelShatter.Position = new Vector2(0, TimingH + 6);
         }
-        _timingZoneBrace.Position = new Vector2(TimingW * braceStart, 0);
-        _timingZoneBrace.Size = new Vector2(TimingW * (1f - braceStart), TimingH);
-        _timingLabelBrace.Position = new Vector2(TimingW * braceStart, TimingH + 6);
+        bool hasBrace = braceStart >= 0f;
+        _timingZoneBrace.Visible = _timingLabelBrace.Visible = hasBrace;
+        if (hasBrace)
+        {
+            _timingZoneBrace.Position = new Vector2(TimingW * braceStart, 0);
+            _timingZoneBrace.Size = new Vector2(TimingW * (1f - braceStart), TimingH);
+            _timingLabelBrace.Position = new Vector2(TimingW * braceStart, TimingH + 6);
+        }
         _timingCursor.Position = new Vector2(TimingW * Mathf.Clamp(elapsed / total, 0f, 1f) - 2, -6);
     }
 
@@ -654,6 +672,7 @@ public partial class Hud : CanvasLayer
             case BattleState.Intro:
                 _banner.Visible = true;
                 _banner.Text = "READY...";
+                _bannerTime = 0f; // CLASH! gets its full window once Fighting starts
                 break;
             case BattleState.Fighting when _bannerTime < 2.3f:
                 _banner.Text = "CLASH!";

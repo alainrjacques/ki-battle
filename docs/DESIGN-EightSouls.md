@@ -4,6 +4,9 @@ Replaces the rock-paper-scissors matchup table (v1) entirely. Design synthesized
 proposals (Eight Souls / Catalyst / Open Wheel) plus an adversarial critique pass; the
 gather→reform→impact timeline is the load-bearing mechanic.
 
+> **Source of truth**: every number below mirrors `Tuning` in `src/ElementDb.cs` as of the
+> last sync. When they disagree, the code is right — update this doc, not the constants.
+
 ## Core loop
 All 8 elements are live on keys 1-8 every fight (no draft). Each element is a SOUL:
 a passive identity that bends existing systems, plus a signature ENTRANCE that detonates
@@ -41,17 +44,17 @@ to your KEYSTONE costs 0 mana and never fires an entrance — home is safety, no
 ## The 8 souls (passive / entrance)
 | # | Soul | Passive (while channeling it) | Entrance (at impact, charged) |
 |---|------|-------------------------------|-------------------------------|
-| 1 | FIRE — Ignition | Empowered+: beam FLARES ×1.45 for 0.6 s every 2.5 s, 0.5 s telegraphed windup; entering Overdrive fast-forwards the next flare | COMBUST: shove +0.055 |
-| 2 | ICE — Permafrost | While dominant ≥1 s: enemy element+beam cooldowns tick ×0.6 | GLACIATE: shove +0.02, +2 s to the enemy's currently-running cooldowns |
-| 3 | WATER — Flow | Own drain ×0.85; incoming DISCRETE spikes (flares, crits, entrance shoves) damped ×0.65 — never sustained overdrive | RIPTIDE: shove +0.02, burn 10 enemy mana; overdriving victim gets overdrive locked 2 s |
-| 4 | LIGHTNING — Overload | Empowered+: every 5 s of channel arms a CRIT ("CRIT ARMED"), fires ×1.8/0.35 s at the enemy's next vulnerability window, self-fires at 6 s. Deterministic, no RNG | CONDUCT: shove +0.03, enemy drain ×1.5 for 3 s |
+| 1 | FIRE — Ignition | Empowered+: beam FLARES ×1.45 for 0.6 s every 2.5 s, 0.5 s telegraphed windup; entering Overdrive fast-forwards the next flare | COMBUST: shove +0.08 |
+| 2 | ICE — Permafrost | While dominant ≥1 s: enemy element+beam cooldowns tick ×0.6 | GLACIATE: shove +0.035, +2 s to the enemy's currently-running cooldowns |
+| 3 | WATER — Flow | Own drain ×0.85; incoming DISCRETE spikes (flares, crits, entrance shoves) damped ×0.65 — never sustained overdrive, never effect riders | RIPTIDE: shove +0.035, burn 10 enemy mana; overdriving victim gets overdrive locked 2 s |
+| 4 | LIGHTNING — Overload | Empowered+: every 5 s of channel arms a CRIT ("CRIT ARMED"), fires ×1.8/0.35 s at the enemy's next vulnerability window (gather/reform/1.5 s after), self-fires at 6 s. Deterministic, no RNG | CONDUCT: shove +0.05, enemy drain ×1.5 for 3 s |
 | 5 | DARKNESS — Devour | While dominant ≥1 s: leech 3 mana/s enemy→you (floor 10, pauses vs exhausted) | ECLIPSE: no shove; channel-steal 8 mana over 2 s (breaks if you reform/exhaust) |
 | 6 | POISON — Corrosion | +1 stack per Empowered+ second (max 8), +2% push per stack — builds AND applies only at Empowered+; decays 1/s once you leave | ENVENOM: +3 stacks instantly |
-| 7 | HOLY — Sanctuary | +3 mana/s regen, exhaust duration halved | PURGE: shove +0.04, cleanses debuffs on you + 2 s immunity |
-| 8 | LIGHT — Velocity | Pip charges ×1.35; switching into Light costs 6 | FLASH: shove +0.02, refunds 3 s of pip charge |
+| 7 | HOLY — Sanctuary | +3 mana/s regen, exhaust duration halved | PURGE: shove +0.05, cleanses debuffs on you + 2 s immunity |
+| 8 | LIGHT — Velocity | Pip charges ×1.35; switching into Light costs 6 | FLASH: shove +0.035, refunds 3 s of pip charge |
 
 ## Switch economy
-Keys 1-8 direct-select (canonical enum order = HUD strip order). Costs: 10 mana, 6 into
+Keys 1-8 direct-select (canonical enum order = HUD strip order). Costs: 7 mana, 6 into
 Light, 0 returning to keystone. Global element cooldown 3 s. Anti-spam = echo rule +
 flat costs + cooldown (no fatigue arithmetic — prices stay memorizable).
 

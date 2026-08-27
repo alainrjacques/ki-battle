@@ -272,12 +272,16 @@ public partial class BattleManager : Node2D
             _ => 0f, // Darkness and Poison enter quietly
         };
 
+        // Water's spike damp applies to the SHOVE only (it is the anti-spike soul,
+        // not an anti-effect one), so riders — including the attacker's own
+        // self-buffs — scale by everything except the Water term.
         float mods = (shattered ? Tuning.ShatterMult : 1f)
                    * (braced ? Tuning.BraceMult : 1f)
-                   * (anyPinpoint ? Tuning.PierceDamp : 1f)
+                   * (anyPinpoint ? Tuning.PierceDamp : 1f);
+        float impulseMods = mods
                    * (victim.CurrentElement == Element.Water ? 1f - Tuning.SpikeDamp : 1f);
 
-        float impulse = shove * (charged ? 1f : Tuning.UnchargedMult) * mods
+        float impulse = shove * (charged ? 1f : Tuning.UnchargedMult) * impulseMods
                       * Mathf.Min(escalation, Tuning.ImpulseEscalationCap);
         impulse = Mathf.Min(impulse, Tuning.MaxImpulse) * direction;
         ClashX = Mathf.Clamp(ClashX + impulse, 0f, 1f);
