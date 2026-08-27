@@ -101,6 +101,7 @@ public partial class LoadoutScreen : Control
                 return b;
             }).ToArray();
         _diffButtons[1].ButtonPressed = true;
+        box.AddChild(MakeLabel("Easy coaches you in battle: on-screen hints say how to react", 16, new Color(1, 1, 1, 0.45f)));
 
         _fight = new Button { Text = "FIGHT", Disabled = true, CustomMinimumSize = new Vector2(260, 70) };
         _fight.AddThemeFontSizeOverride("font_size", 36);

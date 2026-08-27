@@ -33,6 +33,7 @@ public partial class DemoShots : Node
 
         Game.Instance.PlayerLoadout = Loadout.Default();
         Game.Instance.EnemyLoadout = Loadout.Default();
+        Game.Instance.Difficulty = Difficulty.Easy; // coach hints visible in the shots
         var battle = GD.Load<PackedScene>("res://scenes/Battle.tscn").Instantiate<BattleManager>();
         battle.ScriptedMode = true;
         AddChild(battle);

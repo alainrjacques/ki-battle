@@ -43,6 +43,12 @@ public partial class Hud : CanvasLayer
     private Label _popup = null!;
     private float _popupTime;
 
+    // Coach (Easy difficulty): one prioritized what-to-do hint at a time
+    private Label _coach = null!;
+    private float _coachRefresh;
+    private float _coachHold;
+    private int _coachPriority = 99;
+
     // Banners / result
     private Label _banner = null!;
     private PanelContainer _resultPanel = null!;
@@ -160,6 +166,16 @@ public partial class Hud : CanvasLayer
         _popup.Position = new Vector2(0, 250);
         _popup.Visible = false;
         AddChild(_popup);
+
+        // Coach line: above the soul strip, outlined for readability over FX.
+        _coach = MakeLabel("", 27);
+        _coach.HorizontalAlignment = HorizontalAlignment.Center;
+        _coach.AnchorLeft = 0; _coach.AnchorRight = 1;
+        _coach.Position = new Vector2(0, 1080 - 236);
+        _coach.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.9f));
+        _coach.AddThemeConstantOverride("outline_size", 7);
+        _coach.Visible = false;
+        AddChild(_coach);
     }
 
     private void BuildLoadoutStrip()
@@ -311,6 +327,7 @@ public partial class Hud : CanvasLayer
         UpdateLoadoutStrip();
         UpdateTelegraph(dt);
         UpdateBannerAndResult(dt);
+        UpdateCoach(dt);
 
         if (_popupTime > 0f)
         {
@@ -446,6 +463,102 @@ public partial class Hud : CanvasLayer
             _threat.Text = threat;
             _threat.AddThemeColorOverride("font_color", color);
         }
+    }
+
+    /// <summary>Easy-difficulty coach: reads the fight state and says what to press.
+    /// One hint at a time; lower priority number preempts, and a shown hint holds
+    /// for a moment so the line doesn't flicker between conditions.</summary>
+    private void UpdateCoach(float dt)
+    {
+        if (Game.Instance.Difficulty != Difficulty.Easy || _battle.State != BattleState.Fighting)
+        {
+            _coach.Visible = false;
+            _coachPriority = 99;
+            return;
+        }
+
+        _coachHold -= dt;
+        _coachRefresh -= dt;
+        if (_coachRefresh > 0f) return;
+        _coachRefresh = 0.25f;
+
+        (int prio, string text, Color color)? hint = FindHint();
+        if (hint == null)
+        {
+            if (_coachHold <= 0f)
+            {
+                _coach.Visible = false;
+                _coachPriority = 99;
+            }
+            return;
+        }
+
+        var (prio, text, color) = hint.Value;
+        if (prio > _coachPriority && _coachHold > 0f) return; // don't preempt with weaker advice
+        if (text != _coach.Text)
+        {
+            _coach.Text = text;
+            _coach.AddThemeColorOverride("font_color", color);
+        }
+        _coach.Visible = true;
+        _coachPriority = prio;
+        _coachHold = 1.6f;
+    }
+
+    private (int, string, Color)? FindHint()
+    {
+        var danger = new Color(1f, 0.45f, 0.35f);
+        var gold = new Color(1f, 0.85f, 0.35f);
+        var calm = new Color(0.55f, 0.85f, 1f);
+
+        bool enemyIncoming = _enemy.GatherTimer > 0f || _enemy.ReformTimer > 0f;
+        bool playerBusy = _player.GatherTimer > 0f || _player.ReformTimer > 0f;
+
+        // 1. React to an incoming entrance: brace.
+        if (enemyIncoming && _player.Mana > 25f)
+            return (1, "INCOMING — hold SHIFT to BRACE (halves the hit)", danger);
+        if (enemyIncoming)
+            return (1, "INCOMING — too low on mana to brace, ride it out", danger);
+
+        // 2. Their switch is your shatter window.
+        if (playerBusy == false && _player.PipReady && _player.ElementCooldown <= 0f
+            && (_enemy.GatherTimer > 0f || _enemy.SinceReformEnd < 0.8f))
+            return (2, "SHATTER WINDOW — switch souls (1-8) to strike them mid-switch!", gold);
+
+        // 3. Punish an exhausted enemy.
+        if (_enemy.IsExhausted && _player.Mana > 15f)
+            return (3, "ENEMY DRAINED — hold SPACE + SHIFT and shove!", gold);
+
+        // 4-5. Telegraphed enemy spikes.
+        if (_enemy.CurrentElement == Element.Fire && _enemy.IsEmpowered
+            && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup && _player.Mana > 25f)
+            return (4, "FLARE COMING — hold SHIFT to brace through it", danger);
+        if (_enemy.CurrentElement == Element.Lightning && _enemy.CritArmed)
+            return (5, "CRIT ARMED — don't switch now, switching triggers it", danger);
+
+        // 6-8. Ongoing soul pressure and its answers.
+        if (_player.ConductTimer > 0f)
+            return (6, "CONDUCTED — your drain is doubled! HOLY (7) purges it", danger);
+        if (_enemy.CurrentElement == Element.Darkness && _enemy.DominanceTime >= Tuning.DominanceWindow)
+            return (7, "THEY'RE LEECHING YOUR MANA — push back, or HOLY (7) blocks it", danger);
+        if (_enemy.CurrentElement == Element.Poison && _enemy.Stacks >= 4)
+            return (8, "POISON STACKING UP — press E: pinpoint mutes their soul", calm);
+
+        // 9. Back to the wall.
+        if (_battle.ClashX < 0.18f)
+            return (9, "HOLD THE LINE — keep SPACE down, desperation gives +25%!", danger);
+
+        // 10-11. Mana economy.
+        if (_player.IsExhausted)
+            return (10, "DRAINED! Next time release SPACE before the bar empties", danger);
+        if (_player.Mana < 22f && _player.IsEmpowered && _battle.ClashX > 0.3f)
+            return (11, "MANA LOW — release SPACE a moment and recover", calm);
+
+        // 12. Idle pip nudge.
+        if (_player.PipReady && !playerBusy && _player.ElementCooldown <= 0f && _player.SinceReformEnd > 6f)
+            return (12, "REACTION CHARGED — switch souls (1-8) to unleash it", gold);
+
+        return null;
     }
 
     private void UpdateBannerAndResult(float dt)
