@@ -74,8 +74,49 @@ public partial class DemoShots : Node
         GetViewport().GetTexture().GetImage().SavePng("user://shot_tiers_idle_vs_overdrive.png");
         GD.Print("[shots] saved tier contrast");
 
+        // --- Mouse cue layer (AC22). ScriptedMode means a live HUD with NO
+        // PlayerController, so a clean run here is also the proof of the
+        // null-guards (AC17). Three states: no window open, enemy mid-gather
+        // (SHATTER marking), enemy entrance in flight (BRACE cue).
+        battle.ResetBattle();
+        battle.LeftCaster.DebugSetCombo(Element.Holy, BeamType.Single);
+        battle.RightCaster.DebugSetCombo(Element.Ice, BeamType.Single);
+        battle.LeftCaster.WantsChannel = true;
+        battle.RightCaster.WantsChannel = true;
+        battle.RightCaster.WantsOverdrive = false;
+        await WaitSeconds(0.6f);
+
+        HoverAt(new Vector2(72 + 2 * 72 + 26, 1080 - 142)); // hover soul slot 3 (AC18)
+        await WaitSeconds(0.3f);
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_idle.png");
+        GD.Print("[shots] saved cue idle (no window open)");
+
+        bool cueSwitch = battle.RightCaster.TrySwitchElement(Element.Water);
+        GD.Print($"[shots] cue switch accepted={cueSwitch}");
+        await WaitSeconds(0.14f); // inside their 0.25s gather: the shatter window
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_shatter.png");
+        GD.Print($"[shots] saved cue shatter (enemyGather={battle.RightCaster.GatherTimer:0.00})");
+
+        HoverAt(new Vector2(960, 679)); // hover the BRACE cue itself
+        await WaitSeconds(0.3f); // reform: entrance in flight
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_brace.png");
+        GD.Print($"[shots] saved cue brace (incoming={battle.RightCaster.IncomingEntrancePending})");
+
         GD.Print("[shots] done");
         GetTree().Quit(0);
+    }
+
+    /// <summary>Moves the OS cursor over a viewport-space point so the screenshot
+    /// captures a hover state (AC18). The window is 1280x720 against a 1920x1080
+    /// viewport, and Input.WarpMouse takes window pixels.</summary>
+    private void HoverAt(Vector2 viewportPos)
+    {
+        float scale = GetWindow().Size.X / 1920f;
+        var p = viewportPos * scale;
+        Input.WarpMouse(p);
+        // A warp alone does not always emit motion; synthesise one so the Control
+        // actually enters its hover state before the capture.
+        Input.ParseInputEvent(new InputEventMouseMotion { Position = p, GlobalPosition = p });
     }
 
     private async Task WaitSeconds(float seconds)

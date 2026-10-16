@@ -8,14 +8,14 @@ gather→reform→impact timeline is the load-bearing mechanic.
 > last sync. When they disagree, the code is right — update this doc, not the constants.
 
 ## Core loop
-All 8 elements are live on keys 1-8 every fight (no draft). Each element is a SOUL:
+All 8 elements are live on keys 1-8 (or clickable HUD icons) every fight (no draft). Each element is a SOUL:
 a passive identity that bends existing systems, plus a signature ENTRANCE that detonates
 at the clash when a switched beam lands. Element choice answers the FIGHT STATE (mana,
 clash position, enemy tier); switch TIMING is the skill expression. Nothing about the
 enemy's element ever turns your play off.
 
 ## The switch timeline
-- Press (key 1-8): pay cost, GATHER begins — 0.25 s visible windup (beam brightens at the
+- Press (key 1-8, or click the soul icon): pay cost, GATHER begins — 0.25 s visible windup (beam brightens at the
   muzzle, enemy HUD flashes the incoming element). Old element still pushes at full power.
 - Gather end: element changes, REFORM begins — 0.65 s at ×0.5 push (beam re-styles).
 - Impact (press + 0.90 s): the ENTRANCE resolves at the clash orb.
@@ -54,9 +54,39 @@ to your KEYSTONE costs 0 mana and never fires an entrance — home is safety, no
 | 8 | LIGHT — Velocity | Pip charges ×1.35; switching into Light costs 6 | FLASH: shove +0.035, refunds 3 s of pip charge |
 
 ## Switch economy
-Keys 1-8 direct-select (canonical enum order = HUD strip order). Costs: 7 mana, 6 into
+Keys 1-8 (or a click on the strip) direct-select (canonical enum order = HUD strip order). Costs: 7 mana, 6 into
 Light, 0 returning to keystone. Global element cooldown 3 s. Anti-spam = echo rule +
 flat costs + cooldown (no fatigue arithmetic — prices stay memorizable).
+
+## Input: keyboard and mouse (both, always)
+Every action has a key AND a click; no key lost function when the mouse layer landed.
+
+- Souls: keys 1-8, or click the soul icon on the HUD strip. Same `TrySwitchElement` call,
+  same cost / cooldown / gather guards — clicking bypasses nothing.
+- Beams: Q/W/E, or click the beam label.
+- CHANNEL (the one continuous input) is OR'd from three sources: hold SPACE, hold LMB on
+  the arena background, or toggle the on-screen CHANNEL latch pad. The latch is not a free
+  win — beam drain plus exhaust at 0 mana is the existing mana game. It resets on rematch.
+- OVERDRIVE stays momentary: hold SHIFT (or RMB-free: see the BRACE cue below).
+- LMB/RMB are deliberately NOT bound to the `channel`/`overdrive` actions: `Input.IsActionPressed`
+  reads raw device state that a `Control` consuming the event does not clear, so a bound
+  mouse button would make every HUD click silently empower the beam.
+
+### Timed click cues (all difficulties)
+Cues appear when their gameplay window opens and expire when it closes. They are shortcuts
+into the existing API — no new combat rules, no balance constants.
+
+- SHATTER marking: while the enemy is GATHERING and you can actually answer (not mid
+  gather/reform, cooldown clear, mana covers a switch), the eligible soul icons glow gold.
+  It only marks; you still choose the soul.
+- BRACE cue: appears near the clash while a real entrance is in flight
+  (`IncomingEntrancePending` — never beam reforms, keystone returns or echo switches) or
+  during a Fire flare windup. One click grants channel+overdrive for 0.8 s
+  (`PlayerController.BraceGrantDuration`). That is deliberately shorter than the 0.90 s
+  entrance flight: a click fired at their press expires before impact, so the brace is
+  missed. Timing stays the skill. An overdrive lock (Riptide) still suppresses it.
+- PIP cue: the pip socket pulses with a "PIP READY" line while the pip is lit and you are
+  free to switch. Informational only.
 
 ## Pre-fight
 LoadoutScreen becomes SOUL SELECT: pick 1 keystone (starting element, free returns).

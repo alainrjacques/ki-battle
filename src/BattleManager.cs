@@ -22,6 +22,11 @@ public partial class BattleManager : Node2D
     public Caster LeftCaster = null!;
     public Caster RightCaster = null!;
 
+    /// <summary>The human input controller, or null in ScriptedMode / AI-vs-AI smoke
+    /// runs. The HUD reads it for the channel latch and brace grant and MUST
+    /// null-guard it (AC17).</summary>
+    public PlayerController? Player;
+
     public event Action<int>? BattleEnded; // winner side
     public event Action<int, ImpactReport>? EntranceResolved; // attacker side, what landed
 
@@ -92,6 +97,7 @@ public partial class BattleManager : Node2D
                 var pc = new PlayerController();
                 pc.Target = LeftCaster;
                 AddChild(pc);
+                Player = pc;
             }
             AttachAi(RightCaster, LeftCaster);
         }
@@ -216,6 +222,7 @@ public partial class BattleManager : Node2D
         _koTimer = 0f;
         LeftCaster.Setup(Game.Instance.PlayerLoadout);
         RightCaster.Setup(Game.Instance.EnemyLoadout);
+        Player?.ResetInputState(); // a rematch must not start mid-channel or mid-grant (AC9)
     }
 
     /// <summary>Cooldown tick rate imposed on `victim` by an Ice `holder` with sustained dominance.</summary>

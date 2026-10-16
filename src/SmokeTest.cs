@@ -23,6 +23,9 @@ public partial class SmokeTest : Node
             await ExhaustCheck();
             await AiBattleCheck();
             await HardVsEasyCheck();
+            // Last on purpose: it spawns extra battles, and the Hard-vs-Easy sample is
+            // sensitive to the AI RNG sequence that preceding fights consume.
+            await BraceGrantCheck();
             GD.Print("SMOKE OK");
             GetTree().Quit(0);
         }
@@ -173,6 +176,85 @@ public partial class SmokeTest : Node
     }
 
     /// <summary>Overdriven twin beam must drain to zero and trigger exhaustion.</summary>
+    /// <summary>The clicked BRACE grant (PlayerController, 0.8s) must halve an
+    /// entrance that lands inside it, must expire before impact when fired at the
+    /// top of the enemy's gather (0.8 &lt; 0.90 flight, C4/AC14), and must not
+    /// produce overdrive while the caster is Riptide-locked (AC15).</summary>
+    private async Task BraceGrantCheck()
+    {
+        // Real time scale: at TimeScale 8 one physics step is 0.13 game-seconds, which
+        // is coarser than the 0.10 s margin between the 0.8 s grant and the 0.90 s flight.
+        Engine.TimeScale = 1.0;
+        try
+        {
+            float unbraced = await OneEnemyEntrance(-1f); // no click at all
+            float braced = await OneEnemyEntrance(0.35f);
+            float early = await OneEnemyEntrance(0f); // clicked the instant they press
+
+            GD.Print($"[smoke] brace grant: unbraced={unbraced:0.0000} braced={braced:0.0000} earlyClick={early:0.0000}");
+            Assert(unbraced > 0.001f, "control entrance landed nothing");
+            Assert(Mathf.Abs(braced - unbraced * Tuning.BraceMult) < 0.004f,
+                $"braced impulse {braced:0.0000}, expected ~{unbraced * Tuning.BraceMult:0.0000}");
+            Assert(Mathf.Abs(early - unbraced) < 0.004f,
+                $"brace clicked at gather start still braced: impulse {early:0.0000}, expected ~{unbraced:0.0000}");
+        }
+        finally
+        {
+            Engine.TimeScale = 8.0;
+        }
+    }
+
+    /// <summary>Runs one enemy Water entrance against a player driven by a real
+    /// PlayerController, optionally clicking BRACE `clickDelay` game-seconds after
+    /// the enemy presses. Returns the impulse that landed; 0 means no grant was
+    /// requested at all (clickDelay &lt; 0).</summary>
+    private async Task<float> OneEnemyEntrance(float clickDelay)
+    {
+        var battle = await SpawnBattle(MakeLoadout(Element.Holy), MakeLoadout(Element.Holy));
+        while (battle.State != BattleState.Fighting) await NextPhysicsFrame();
+
+        var pc = new PlayerController { Target = battle.LeftCaster };
+        battle.AddChild(pc);
+        battle.Player = pc;
+
+        ImpactReport? landed = null;
+        void OnEntrance(int side, ImpactReport r)
+        {
+            if (side == 1) landed ??= r;
+        }
+        battle.EntranceResolved += OnEntrance;
+        try
+        {
+            Assert(battle.RightCaster.TrySwitchElement(Element.Water), "enemy switch rejected");
+            if (clickDelay > 0f) await WaitGameSeconds(battle, clickDelay);
+            if (clickDelay >= 0f) pc.GrantBrace();
+            await WaitGameSeconds(battle, 1.3f);
+            if (landed is not { } r) throw new InvalidOperationException("enemy entrance never resolved");
+            Assert(r.Braced == (clickDelay >= 0.2f),
+                $"Braced={r.Braced} for a click {clickDelay:0.000}s into a 0.90s flight");
+
+            // AC15: the Riptide victim cannot overdrive, and the grant is suppressed
+            // by the existing Tier rule rather than special-cased.
+            if (battle.LeftCaster.OverdriveLockTimer > 0f)
+            {
+                pc.GrantBrace();
+                await WaitGameSeconds(battle, 0.1f);
+                Assert(battle.LeftCaster.Tier != PowerTier.Overdrive,
+                    "brace grant overdrove through an active OverdriveLockTimer");
+            }
+            return r.Impulse;
+        }
+        finally
+        {
+            battle.EntranceResolved -= OnEntrance;
+            pc.SetProcess(false);
+            pc.SetPhysicsProcess(false);
+            battle.Player = null;
+            battle.LeftCaster.WantsChannel = battle.LeftCaster.WantsOverdrive = false;
+            pc.QueueFree();
+        }
+    }
+
     private async Task ExhaustCheck()
     {
         var battle = await SpawnBattle(MakeLoadout(Element.Fire, BeamType.Twin), MakeLoadout(Element.Fire));
