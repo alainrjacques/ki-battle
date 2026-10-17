@@ -175,7 +175,6 @@ public partial class SmokeTest : Node
 
     }
 
-    /// <summary>Overdriven twin beam must drain to zero and trigger exhaustion.</summary>
     /// <summary>The clicked BRACE grant (PlayerController, 0.8s) must halve an
     /// entrance that lands inside it, must expire before impact when fired at the
     /// top of the enemy's gather (0.8 &lt; 0.90 flight, C4/AC14), and must not
@@ -197,6 +196,32 @@ public partial class SmokeTest : Node
                 $"braced impulse {braced:0.0000}, expected ~{unbraced * Tuning.BraceMult:0.0000}");
             Assert(Mathf.Abs(early - unbraced) < 0.004f,
                 $"brace clicked at gather start still braced: impulse {early:0.0000}, expected ~{unbraced:0.0000}");
+
+            // X-2-1: the cue must not promise a brace the Tier rule will veto. These
+            // cases all click *with an entrance in flight* (the old locked case ran after
+            // the entrance resolved, so eta was -1 and the predicate was false for the
+            // wrong reason) and the invariant stays `predicted == ImpactReport.Braced`.
+            //   (a) overdrive-locked - exactly the state the game hands you for bracing a
+            //       Water entrance: RiptideOverdriveLock is 2.0 s, the flight is 0.90 s.
+            float locked = await OneEnemyEntrance(0.35f, expectBraced: false, preLock: Tuning.RiptideOverdriveLock);
+            //   (b) low mana - the grant's own forced overdrive drain (twin beam: 44/s
+            //       against 8/s Holy regen) empties the bar mid-flight, and X-1-9 means
+            //       the player cannot back out once the grant is running.
+            float drained = await OneEnemyEntrance(0.25f, expectBraced: false, lowMana: true);
+            //   (c) either side of the grant/flight boundary (F-2-1): eta ~0.75 must brace,
+            //       eta ~0.85 must not, which pins the 0.8 s edge to within one physics
+            //       step plus the margin the predicate now requires.
+            float justInside = await OneEnemyEntrance(0.15f, expectBraced: true);
+            float justOutside = await OneEnemyEntrance(0.05f, expectBraced: false);
+
+            GD.Print($"[smoke] brace vetoes: locked={locked:0.0000} drained={drained:0.0000} "
+                     + $"etaJustInside={justInside:0.0000} etaJustOutside={justOutside:0.0000}");
+            Assert(Mathf.Abs(locked - unbraced) < 0.004f,
+                $"overdrive-locked brace softened the hit: {locked:0.0000}, expected ~{unbraced:0.0000}");
+            Assert(Mathf.Abs(justInside - unbraced * Tuning.BraceMult) < 0.004f,
+                $"click at eta~0.75 did not brace: {justInside:0.0000}");
+            Assert(Mathf.Abs(justOutside - unbraced) < 0.004f,
+                $"click at eta~0.85 braced anyway: {justOutside:0.0000}");
         }
         finally
         {
@@ -207,8 +232,12 @@ public partial class SmokeTest : Node
     /// <summary>Runs one enemy Water entrance against a player driven by a real
     /// PlayerController, optionally clicking BRACE `clickDelay` game-seconds after
     /// the enemy presses. Returns the impulse that landed; 0 means no grant was
-    /// requested at all (clickDelay &lt; 0).</summary>
-    private async Task<float> OneEnemyEntrance(float clickDelay)
+    /// requested at all (clickDelay &lt; 0). `expectBraced` overrides the default
+    /// timing oracle for the X-2-1 veto cases; `preLock` locks the player out of
+    /// overdrive before the entrance starts, and `lowMana` leaves the player with just
+    /// the mana floor and a twin beam so the grant's own drain exhausts it in flight.</summary>
+    private async Task<float> OneEnemyEntrance(float clickDelay, bool? expectBraced = null,
+                                               float preLock = 0f, bool lowMana = false)
     {
         var battle = await SpawnBattle(MakeLoadout(Element.Holy), MakeLoadout(Element.Holy));
         while (battle.State != BattleState.Fighting) await NextPhysicsFrame();
@@ -225,13 +254,42 @@ public partial class SmokeTest : Node
         battle.EntranceResolved += OnEntrance;
         try
         {
+            if (preLock > 0f) battle.LeftCaster.ApplyOverdriveLock(preLock);
+            if (lowMana) battle.LeftCaster.DebugSetCombo(Element.Holy, BeamType.Twin);
             Assert(battle.RightCaster.TrySwitchElement(Element.Water), "enemy switch rejected");
             if (clickDelay > 0f) await WaitGameSeconds(battle, clickDelay);
-            if (clickDelay >= 0f) pc.GrantBrace();
+            // X-1-1 / X-2-1: PredictBrace is the one predicate the HUD's BRACE label is
+            // allowed to trust. Sample it at the instant of the click, then check it
+            // against what the entrance actually did 0.9 s later - if the two ever
+            // disagree, the cue is lying to the player again.
+            float eta = -1f;
+            bool predictedBraced = false;
+            var predict = PlayerController.BracePrediction.None;
+            float manaAtClick = battle.LeftCaster.Mana;
+            if (clickDelay >= 0f)
+            {
+                // Burn to the mana floor immediately before the click, so the player is
+                // not merely low but low *at the moment the grant starts*.
+                if (lowMana) battle.LeftCaster.BurnMana(Tuning.ManaMax);
+                manaAtClick = battle.LeftCaster.Mana;
+                pc.GrantBrace();
+                eta = PlayerController.ImpactEta(battle.RightCaster);
+                predict = pc.PredictBrace(eta);
+                predictedBraced = pc.WillBeBracedAt(eta);
+            }
             await WaitGameSeconds(battle, 1.3f);
             if (landed is not { } r) throw new InvalidOperationException("enemy entrance never resolved");
-            Assert(r.Braced == (clickDelay >= 0.2f),
-                $"Braced={r.Braced} for a click {clickDelay:0.000}s into a 0.90s flight");
+            bool oracle = expectBraced ?? clickDelay >= 0.2f;
+            Assert(r.Braced == oracle,
+                $"Braced={r.Braced} (expected {oracle}) for a click {clickDelay:0.000}s into a "
+                + $"0.90s flight (preLock={preLock:0.00} lowMana={lowMana})");
+            GD.Print($"[smoke]   click at {clickDelay:0.00}s: impactEta={eta:0.0000} "
+                     + $"predict={predict} willBrace={predictedBraced} actuallyBraced={r.Braced}"
+                     + (preLock > 0f ? $" preLock={preLock:0.00}" : "")
+                     + (lowMana ? $" mana@click={manaAtClick:0.0}" : ""));
+            Assert(predictedBraced == r.Braced,
+                $"BRACE cue predicate said willBrace={predictedBraced} ({predict}) but the impact "
+                + $"was Braced={r.Braced} (click {clickDelay:0.000}s, eta {eta:0.0000}s)");
 
             // AC15: the Riptide victim cannot overdrive, and the grant is suppressed
             // by the existing Tier rule rather than special-cased.
@@ -255,6 +313,7 @@ public partial class SmokeTest : Node
         }
     }
 
+    /// <summary>Overdriven twin beam must drain to zero and trigger exhaustion.</summary>
     private async Task ExhaustCheck()
     {
         var battle = await SpawnBattle(MakeLoadout(Element.Fire, BeamType.Twin), MakeLoadout(Element.Fire));

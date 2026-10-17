@@ -86,7 +86,9 @@ public partial class DemoShots : Node
         battle.RightCaster.WantsOverdrive = false;
         await WaitSeconds(0.6f);
 
-        HoverAt(new Vector2(72 + 2 * 72 + 26, 1080 - 142)); // hover soul slot 3 (AC18)
+        // Hover a soul slot that is NOT the active one, so the screenshot separates the
+        // hover state from the active-slot treatment (AC18).
+        HoverAt(new Vector2(72 + 4 * 78 + 26, 1080 - 142)); // hover soul slot 5
         await WaitSeconds(0.3f);
         GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_idle.png");
         GD.Print("[shots] saved cue idle (no window open)");
@@ -101,6 +103,34 @@ public partial class DemoShots : Node
         await WaitSeconds(0.3f); // reform: entrance in flight
         GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_brace.png");
         GD.Print($"[shots] saved cue brace (incoming={battle.RightCaster.IncomingEntrancePending})");
+
+        // --- BRACE label states (X-2-6). These only exist when a PlayerController is
+        // present, so attach one to the scripted battle and rebind the HUD: the whole
+        // X-1-1/X-2-1 fix (BRACED / TOO EARLY / NO BRACE, blue vs amber drain bar) had
+        // no screenshot coverage at all, and this project signs off visuals by looking.
+        await WaitSeconds(2.8f); // previous entrance resolves + the 3 s switch cooldown clears
+        var pc = new PlayerController { Target = battle.LeftCaster };
+        battle.AddChild(pc);
+        battle.Player = pc;
+        battle.GetNode<Hud>("Hud").RebindController();
+        pc.ToggleChannelLatch(); // keeps the left beam channelling, as the shots above did
+        battle.LeftCaster.DebugSetCombo(Element.Holy, BeamType.Single);
+
+        bool tooEarlySwitch = battle.RightCaster.TrySwitchElement(Element.Lightning);
+        pc.GrantBrace(); // clicked the instant they press: 0.8 s grant, 0.90 s flight
+        await WaitSeconds(0.12f);
+        float etaEarly = PlayerController.ImpactEta(battle.RightCaster);
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_brace_too_early.png");
+        GD.Print($"[shots] saved cue brace TOO EARLY (switch={tooEarlySwitch} eta={etaEarly:0.00} "
+                 + $"predict={pc.PredictBrace(etaEarly)})");
+
+        // Same entrance, re-clicked once the flight is short enough for the grant.
+        await WaitSeconds(0.25f);
+        pc.GrantBrace();
+        await WaitSeconds(0.08f);
+        float etaBraced = PlayerController.ImpactEta(battle.RightCaster);
+        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_braced.png");
+        GD.Print($"[shots] saved cue BRACED (eta={etaBraced:0.00} predict={pc.PredictBrace(etaBraced)})");
 
         GD.Print("[shots] done");
         GetTree().Quit(0);

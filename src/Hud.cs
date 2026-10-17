@@ -23,7 +23,12 @@ public partial class Hud : CanvasLayer
     private const float ManaW = 420f, ManaH = 20f;
 
     // Soul strip (all 8 elements, keys 1-8)
+    // Soul strip: the hit rect (_elementIcons) is fixed and covers every pixel that
+    // glows - halo, digit and name label included (X-1-2). The visuals live in a child
+    // Control (_elementVisuals) which is what gets scaled/dimmed, so hover and
+    // marking animation can never resize the click target.
     private readonly Control[] _elementIcons = new Control[8];
+    private readonly Control[] _elementVisuals = new Control[8];
     private readonly ColorRect[] _elementCooldown = new ColorRect[8];
     private readonly Label[] _beamLabels = new Label[3];
     private ColorRect _beamCooldown = null!;
@@ -68,17 +73,45 @@ public partial class Hud : CanvasLayer
     private Label _channelPadState = null!;
 
     private readonly ColorRect[] _shatterMark = new ColorRect[8];
+    // X-2-3: hover needs a channel of its own. Marked slots already sit at full
+    // brightness and the mark scale, so "bigger + brighter" cannot read as hover inside
+    // the 0.25 s SHATTER window - a white bracket under the slot can.
+    private readonly Control[] _slotHoverRing = new Control[8];
     private Label _shatterLabel = null!;
 
     private Control _braceCue = null!;
     private ColorRect _braceFill = null!;
     private Label _braceLabel = null!;
+    private ColorRect _braceGrantTrack = null!, _braceGrantBar = null!;
 
     private Label _pipCue = null!;
 
     private int _hoverSlot = -1, _hoverBeam = -1;
     private bool _hoverPad, _hoverBrace;
+    private bool _wasLive;
     private float _cuePulse;
+
+    // Soul-slot geometry (X-1-2: the hit rect must contain everything that glows).
+    // The icon is 52x52 at (72 + i*SlotPitch, 912). The SHATTER halo is a 50x50 rect
+    // rotated 45 degrees - a diamond of half-diagonal 35.36 px, so 70.7 px wide, wider
+    // than the icon by ~9.4 px on each side; the digit sits 8 px above the icon and the
+    // element name 16 px below it. Slot visuals scale (0.9 resting, 1.2 active, 1.0
+    // marked, 1.05 hovered) about their centre. Dropping the mark scale to 1.0 (X-2-3)
+    // also widens the X-2-4 slack: a glowing-but-unhovered slot - the only one a player
+    // aims at during the 0.25 s window - now spans slot-local x 2.64 .. 75.36 inside a
+    // 78 px rect, i.e. 2.6 px of margin at the diamond tips instead of 0.87 px. A hovered
+    // slot still reaches 0.87 px, but by then the pointer is already inside the rect.
+    // The inset hit rect covers every case. Pitch == hit width, so the rects tile edge to edge:
+    // no overlap between neighbours, and no sliver between them that would fall
+    // through to the arena surface and start a channel hold instead of a switch.
+    private const float SlotIconSize = 52f;
+    private const float SlotPitch = 78f, SlotHitW = 78f, SlotHitH = 92f;
+    private const float SlotInsetX = 12f, SlotInsetY = 15f;
+    private const float SlotIconX = 72f, SlotIconY = 1080f - 168f;
+    // 1.07 is the largest scale whose halo still fits the hit rect, so hover grows by
+    // 1.05 and the SHATTER mark stays at 1.0: the mark reads as "undimmed + haloed" and
+    // hover keeps size growth, a white bracket and brightness to itself (X-2-3/AC18).
+    private const float SlotHoverScale = 1.05f, SlotMarkScale = 1.0f;
 
     // Clash beam height: muzzles sit at caster y 900 - 103*1.25 scale.
     private const float ClashLeftX = 300f, ClashRightX = 1620f, ClashY = 771f;
@@ -218,15 +251,20 @@ public partial class Hud : CanvasLayer
         _coach = MakeLabel("", 27);
         _coach.HorizontalAlignment = HorizontalAlignment.Center;
         _coach.AnchorLeft = 0; _coach.AnchorRight = 1;
-        _coach.Position = new Vector2(0, 1080 - 236);
+        _coach.Position = new Vector2(0, 1080 - 272);
         _coach.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.9f));
         _coach.AddThemeConstantOverride("outline_size", 7);
         _coach.Visible = false;
         AddChild(_coach);
 
         // Timing bar under the coach line: ----|gold|----|red|-- with a sweeping
-        // cursor. Gold = switch now (shatter), red = hold SHIFT (brace at impact).
-        _timingBar = new Control { Position = new Vector2(960 - TimingW / 2, 1080 - 196), Visible = false };
+        // cursor. Gold = switch now (shatter), red = brace (SPACE+SHIFT) at impact.
+        // X-2-5: it used to sit at y 884 with its SHATTER/BRACE captions running from
+        // y 896 straight across the beam labels at y 916 - and those labels are now
+        // click targets, which must stay readable. The whole bottom band therefore moved
+        // up one notch: banner 774, coach 808, bar 860 with captions ending at ~892,
+        // 24 px clear of the beam-label row.
+        _timingBar = new Control { Position = new Vector2(960 - TimingW / 2, 1080 - 220), Visible = false };
         _timingBar.AddChild(new ColorRect { Color = new Color(0, 0, 0, 0.7f), Position = new Vector2(-4, -4), Size = new Vector2(TimingW + 8, TimingH + 8) });
         _timingBar.AddChild(new ColorRect { Color = new Color(0.35f, 0.35f, 0.4f), Size = new Vector2(TimingW, TimingH) });
         _timingZoneShatter = new ColorRect { Color = new Color(1f, 0.85f, 0.35f, 0.95f), Size = new Vector2(0, TimingH) };
@@ -253,10 +291,20 @@ public partial class Hud : CanvasLayer
             var style = ElementDb.Style((Element)i);
             var slot = new Control
             {
-                Position = new Vector2(72 + i * 72, 1080 - 168),
-                Size = new Vector2(52, 52),
+                Position = new Vector2(SlotIconX - SlotInsetX + i * SlotPitch, SlotIconY - SlotInsetY),
+                Size = new Vector2(SlotHitW, SlotHitH),
                 MouseFilter = Control.MouseFilterEnum.Stop,
             };
+            // Everything drawn sits in here; scaling this leaves the hit rect alone.
+            var visual = new Control
+            {
+                Position = new Vector2(SlotInsetX, SlotInsetY),
+                Size = new Vector2(SlotIconSize, SlotIconSize),
+                // Scale about the icon centre so growth is symmetric and bounded.
+                PivotOffset = new Vector2(SlotIconSize / 2f, SlotIconSize / 2f),
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            slot.AddChild(visual);
 
             // SHATTER halo, behind everything: a rotated rect's diamond is centred
             // at pos + (0, size/sqrt2), so the offset keeps it concentric with the icon.
@@ -269,7 +317,7 @@ public partial class Hud : CanvasLayer
                 Visible = false,
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
-            slot.AddChild(_shatterMark[i]);
+            visual.AddChild(_shatterMark[i]);
 
             if ((Element)i == _player.Keystone)
             {
@@ -280,7 +328,7 @@ public partial class Hud : CanvasLayer
                     Position = new Vector2(26, -4),
                     Rotation = Mathf.Pi / 4,
                 };
-                slot.AddChild(ring);
+                visual.AddChild(ring);
             }
             var diamond = new ColorRect
             {
@@ -289,16 +337,16 @@ public partial class Hud : CanvasLayer
                 Position = new Vector2(26, 0),
                 Rotation = Mathf.Pi / 4,
             };
-            slot.AddChild(diamond);
+            visual.AddChild(diamond);
 
             // The digit stays on the icon: a clickable must still name its key (AC18).
             var key = MakeLabel($"{i + 1}", 15, new Color(1, 1, 1, 0.8f));
             key.Position = new Vector2(-4, -8);
-            slot.AddChild(key);
+            visual.AddChild(key);
 
             var name = MakeLabel(ElementAbbrev[i], 12);
             name.Position = new Vector2(8, 50);
-            slot.AddChild(name);
+            visual.AddChild(name);
 
             _elementCooldown[i] = new ColorRect
             {
@@ -306,13 +354,39 @@ public partial class Hud : CanvasLayer
                 Size = new Vector2(52, 0),
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
-            slot.AddChild(_elementCooldown[i]);
+            visual.AddChild(_elementCooldown[i]);
+
+            // Hover bracket: a sibling of the scaled visual, so it lives in the hit
+            // rect's own space and cannot inflate the click target (X-1-2). Hidden
+            // unless the pointer is on this slot, which makes it the one treatment no
+            // other state (resting / active / SHATTER-marked) ever uses (X-2-3).
+            _slotHoverRing[i] = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
+            foreach (var bar in new[]
+                     {
+                         // under-bar plus two short uprights: a bracket, not a box, so it
+                         // never competes with the keystone ring or the gold halo.
+                         new Rect2(6, SlotHitH - 7, SlotHitW - 12, 3),
+                         new Rect2(6, SlotHitH - 18, 3, 11),
+                         new Rect2(SlotHitW - 9, SlotHitH - 18, 3, 11),
+                     })
+            {
+                _slotHoverRing[i].AddChild(new ColorRect
+                {
+                    Color = Colors.White,
+                    Position = bar.Position,
+                    Size = bar.Size,
+                    MouseFilter = Control.MouseFilterEnum.Ignore,
+                });
+            }
+            _slotHoverRing[i].Visible = false;
+            slot.AddChild(_slotHoverRing[i]);
 
             slot.GuiInput += e => OnSlotInput(idx, e);
             slot.MouseEntered += () => _hoverSlot = idx;
             slot.MouseExited += () => { if (_hoverSlot == idx) _hoverSlot = -1; };
 
             _elementIcons[i] = slot;
+            _elementVisuals[i] = visual;
             AddChild(slot);
         }
 
@@ -338,9 +412,14 @@ public partial class Hud : CanvasLayer
         };
         AddChild(_beamCooldown);
 
-        // SHATTER banner over the strip, left of the Easy timing bar (x >= 780).
+        // SHATTER banner: its own centred row above the Easy coach line (y 808) and
+        // the Easy timing bar (y 860), so the bottom band stacks instead of colliding
+        // - the old left-aligned placement left only 12 px of clearance at 720p
+        // against a coach line whose text length is dynamic (X-1-11 / F-1-3).
         _shatterLabel = MakeLabel("SHATTER WINDOW — CLICK A GLOWING SOUL (1-8)", 19, new Color(1f, 0.85f, 0.35f));
-        _shatterLabel.Position = new Vector2(76, 1080 - 200);
+        _shatterLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        _shatterLabel.AnchorLeft = 0; _shatterLabel.AnchorRight = 1;
+        _shatterLabel.Position = new Vector2(0, 1080 - 306);
         _shatterLabel.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.9f));
         _shatterLabel.AddThemeConstantOverride("outline_size", 7);
         _shatterLabel.Visible = false;
@@ -485,7 +564,26 @@ public partial class Hud : CanvasLayer
         _braceLabel = Outlined(MakeLabel("BRACE", 38, new Color(1f, 0.86f, 0.7f)));
         _braceLabel.Position = new Vector2(14, -2);
         _braceCue.AddChild(_braceLabel);
-        var braceKey = Outlined(MakeLabel("click  /  hold SHIFT", 17, new Color(1, 1, 1, 0.95f)));
+        // Grant-vs-impact bar (X-1-1): drains left-to-right while a grant runs, drawn
+        // against the full width = the time still to run before impact. Empty bar
+        // under "TOO EARLY" is the whole message: this grant will not reach the hit.
+        _braceGrantTrack = new ColorRect
+        {
+            Color = new Color(0, 0, 0, 0.55f),
+            Position = new Vector2(14, 40),
+            Size = new Vector2(212, 7),
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        _braceCue.AddChild(_braceGrantTrack);
+        _braceGrantBar = new ColorRect
+        {
+            Color = new Color(0.45f, 0.85f, 1f, 0.95f),
+            Size = new Vector2(0, 7),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        _braceGrantTrack.AddChild(_braceGrantBar);
+        var braceKey = Outlined(MakeLabel("click  /  hold SPACE+SHIFT", 17, new Color(1, 1, 1, 0.95f)));
         braceKey.Position = new Vector2(16, 48);
         _braceCue.AddChild(braceKey);
         _braceCue.GuiInput += OnBraceInput;
@@ -494,7 +592,7 @@ public partial class Hud : CanvasLayer
         AddChild(_braceCue);
 
         // PIP cue: informational pulse beside the existing socket (D3).
-        _pipCue = Outlined(MakeLabel("PIP READY - SWITCH SOULS", 17, new Color(1f, 0.85f, 0.3f)));
+        _pipCue = Outlined(MakeLabel("PIP READY", 17, new Color(1f, 0.85f, 0.3f)));
         _pipCue.Position = new Vector2(60 + ManaW + 62, 1080 - 58);
         _pipCue.Visible = false;
         AddChild(_pipCue);
@@ -502,19 +600,41 @@ public partial class Hud : CanvasLayer
 
     /// <summary>Everything the HUD draws is click-through except the declared
     /// clickables and the result panel. Without this, any ColorRect (MouseFilter
-    /// defaults to Stop) would swallow arena holds and cue clicks alike.</summary>
+    /// defaults to Stop) would swallow arena holds and cue clicks alike.
+    /// X-1-10: this used to be a one-shot walk at build time, so any Control added to
+    /// the HUD later kept the Stop default and silently ate arena holds. The walk now
+    /// records the declared clickables and stays armed via SceneTree.NodeAdded, so a
+    /// Control added at any later point is neutralised the moment it enters the
+    /// tree. The connection dies with this node, so headless (where the HUD is freed
+    /// before Build ever runs) is unaffected.</summary>
     private void ApplyMouseFilters()
     {
-        foreach (Node child in GetChildren()) SetFilterRecursive(child, Control.MouseFilterEnum.Ignore);
+        _clickables.Clear();
+        _clickables.Add(_arena);
+        _clickables.Add(_channelPad);
+        _clickables.Add(_braceCue);
+        foreach (var slot in _elementIcons) _clickables.Add(slot);
+        foreach (var label in _beamLabels) _clickables.Add(label);
 
-        _arena.MouseFilter = Control.MouseFilterEnum.Stop;
-        _channelPad.MouseFilter = Control.MouseFilterEnum.Stop;
-        _braceCue.MouseFilter = Control.MouseFilterEnum.Stop;
-        foreach (var slot in _elementIcons) slot.MouseFilter = Control.MouseFilterEnum.Stop;
-        foreach (var label in _beamLabels) label.MouseFilter = Control.MouseFilterEnum.Stop;
+        foreach (Node child in GetChildren()) SetFilterRecursive(child, Control.MouseFilterEnum.Ignore);
+        foreach (var c in _clickables) c.MouseFilter = Control.MouseFilterEnum.Stop;
 
         // The result panel keeps its buttons live (Rematch / Loadout / Quit).
         SetFilterRecursive(_resultPanel, Control.MouseFilterEnum.Stop);
+
+        GetTree().NodeAdded += OnHudNodeAdded;
+    }
+
+    private readonly System.Collections.Generic.HashSet<Control> _clickables = new();
+
+    /// <summary>Keeps the click-through invariant true for Controls added after
+    /// Build(): anything under this HUD that is not a declared clickable and not part
+    /// of the result panel becomes Ignore as it enters the tree (X-1-10).</summary>
+    private void OnHudNodeAdded(Node node)
+    {
+        if (node is not Control c || !IsAncestorOf(c) || _clickables.Contains(c)) return;
+        if (c == _resultPanel || _resultPanel.IsAncestorOf(c)) return;
+        c.MouseFilter = Control.MouseFilterEnum.Ignore;
     }
 
     private static void SetFilterRecursive(Node node, Control.MouseFilterEnum filter)
@@ -568,7 +688,50 @@ public partial class Hud : CanvasLayer
         if (!IsLeftPress(e)) return;
         _braceCue.AcceptEvent();
         if (!Interactive || _controller == null) return;
+        // X-1-8: cue visibility is computed in _Process but the entrance resolves in
+        // _PhysicsProcess, so for up to one render frame after impact the cue was still
+        // visible and clickable. Re-test the window now rather than trusting last
+        // frame's visibility, so the grant really does expire with its window (D3/AC16).
+        if (!BraceWindowOpen()) return;
         _controller.GrantBrace();
+    }
+
+    /// <summary>The BRACE window, recomputed on demand so a click is judged against the
+    /// current frame. AC12: reads IncomingEntrancePending, never ReformTimer; the Fire
+    /// flare windup is the one non-entrance window that earns a brace (D3).</summary>
+    private bool BraceWindowOpen()
+    {
+        bool flareWindup = _enemy.CurrentElement == Element.Fire && _enemy.IsEmpowered
+                           && _enemy.FlareActiveTimer <= 0f
+                           && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup;
+        return _enemy.IncomingEntrancePending || flareWindup;
+    }
+
+    /// <summary>True when the OS pointer sits inside one of the declared clickables, so
+    /// a held LMB re-armed on the transition into Fighting can never be mistaken for an
+    /// arena hold on top of a cue (AC6).</summary>
+    private bool PointerOverClickable()
+    {
+        var p = _arena.GetGlobalMousePosition();
+        foreach (var slot in _elementIcons)
+            if (ScaledGlobalRect(slot).HasPoint(p)) return true;
+        foreach (var label in _beamLabels)
+            if (ScaledGlobalRect(label).HasPoint(p)) return true;
+        // The result panel is deliberately absent: the only caller is the transition
+        // into Fighting, which requires Interactive, which requires the panel to be
+        // down - the old `_resultPanel.Visible &&` term was unreachable (X-2-7).
+        return ScaledGlobalRect(_channelPad).HasPoint(p)
+               || (BraceWindowOpen() && ScaledGlobalRect(_braceCue).HasPoint(p));
+    }
+
+    /// <summary>Control.GetGlobalRect() ignores Scale, so a hovered pad (1.05) or BRACE
+    /// cue (1.1) under-reported its own bounds. Scale happens about PivotOffset, so
+    /// re-derive the drawn rect from it (X-2-7 / F-2-4).</summary>
+    private static Rect2 ScaledGlobalRect(Control c)
+    {
+        var r = c.GetGlobalRect();
+        var s = c.Scale;
+        return new Rect2(r.Position + c.PivotOffset * (Vector2.One - s), r.Size * s);
     }
 
     /// <summary>Drives the cue layer: appear when the gameplay window opens, expire
@@ -577,18 +740,43 @@ public partial class Hud : CanvasLayer
     /// hover states win over the resting scale/modulate.</summary>
     private void UpdateMouseLayer(float dt)
     {
-        _cuePulse += dt;
+        // sin(9x) has period Tau/9, so wrapping there keeps the pulse continuous
+        // while the accumulator stays bounded.
+        _cuePulse = Mathf.Wrap(_cuePulse + dt, 0f, Mathf.Tau / 9f);
         float pulse = 0.65f + 0.35f * Mathf.Sin(_cuePulse * 9f);
         bool live = Interactive;
 
-        if (!live && _controller != null) _controller.ArenaHold = false;
+        if (!live)
+        {
+            if (_controller != null) _controller.ArenaHold = false;
+            // An inert Control does not reliably emit MouseExited, which would leave a
+            // slot rendering pre-hovered on its next appearance (X-1-7).
+            _hoverSlot = _hoverBeam = -1;
+            _hoverPad = _hoverBrace = false;
+        }
+        else if (!_wasLive && _controller != null
+                 && Input.IsMouseButtonPressed(MouseButton.Left) && !PointerOverClickable())
+        {
+            // X-1-6: an LMB held through the Intro was never delivered to the arena
+            // Control (it was Ignore then), so no press arrived once Fighting began and
+            // the player had to release and re-click - while a held SPACE just works.
+            // Re-arm the hold from raw state on the transition so the two devices match.
+            // Raw mouse state is still never consulted on a cue click (AC6).
+            _controller.ArenaHold = true;
+        }
+        _wasLive = live;
+
         _arena.MouseFilter = live ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
 
-        // Clickables are hidden and inert outside Fighting (AC17).
-        for (int i = 0; i < 8; i++) _elementIcons[i].Visible = live;
-        for (int i = 0; i < 3; i++) _beamLabels[i].Visible = live;
-        _beamCooldown.Visible = live;
-        _channelPad.Visible = live;
+        // Clickables go inert outside Fighting. They stay *drawn*, though: the soul
+        // strip, beam labels and CHANNEL pad are pre-existing HUD furniture and used to
+        // render through the READY banner and the KO freeze (F-1-1 / X-1-5). AC17's
+        // purpose - cue clicks must not steal Rematch/Quit - is carried by MouseFilter
+        // plus the Interactive re-check in every handler, not by hiding them.
+        var clickFilter = live ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
+        for (int i = 0; i < 8; i++) _elementIcons[i].MouseFilter = clickFilter;
+        for (int i = 0; i < 3; i++) _beamLabels[i].MouseFilter = clickFilter;
+        _channelPad.MouseFilter = clickFilter;
 
         bool playerBusy = _player.GatherTimer > 0f || _player.ReformTimer > 0f;
 
@@ -603,41 +791,85 @@ public partial class Hud : CanvasLayer
             bool mark = window && e != _player.CurrentElement
                         && _player.EntranceEligible(e) && _player.Mana >= _player.SwitchCost(e);
             _shatterMark[i].Visible = mark;
+            // Hover bracket: orthogonal to the mark, so the pointer is still traceable
+            // while six slots glow (X-2-3). Reset here so it cannot survive !live.
+            _slotHoverRing[i].Visible = live && _hoverSlot == i;
             if (mark)
             {
                 _shatterMark[i].Color = new Color(1f, 0.88f, 0.4f, 0.7f + 0.3f * pulse);
                 // UpdateLoadoutStrip dims idle slots to 50% alpha; a marked slot is
                 // a live choice, so it comes back to full and lifts slightly.
-                _elementIcons[i].Modulate = Colors.White;
-                _elementIcons[i].Scale = Vector2.One * 1.05f;
+                _elementVisuals[i].Modulate = Colors.White;
+                _elementVisuals[i].Scale = Vector2.One * SlotMarkScale;
                 marked++;
             }
         }
         _shatterLabel.Visible = marked > 0;
         if (marked > 0) _shatterLabel.Modulate = new Color(1, 1, 1, 0.6f + 0.4f * pulse);
 
-        // --- BRACE cue (AC12): reads IncomingEntrancePending, never ReformTimer.
-        // The Fire flare windup is the one non-entrance window that earns a brace (D3).
-        bool flareWindup = _enemy.CurrentElement == Element.Fire && _enemy.IsEmpowered
-                           && _enemy.FlareActiveTimer <= 0f
-                           && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup;
-        bool braceWindow = live && (_enemy.IncomingEntrancePending || flareWindup);
+        // --- BRACE cue (AC12): see BraceWindowOpen.
+        bool braceWindow = live && BraceWindowOpen();
         _braceCue.Visible = braceWindow;
         if (braceWindow)
         {
             float cx = Mathf.Lerp(ClashLeftX, ClashRightX, _battle.ClashX);
             _braceCue.Position = new Vector2(Mathf.Clamp(cx - 120f, 20f, 1920f - 260f), ClashY - 130f);
-            bool granted = _controller?.BraceGrantActive == true;
-            _braceLabel.Text = granted ? "BRACED" : "BRACE";
-            _braceFill.Color = granted
+
+            // X-2-1 / X-2-2: the label is a pure function of ONE predicate that answers
+            // "will this caster be in PowerTier.Overdrive when the hit resolves" - the
+            // same thing BattleManager reads to decide ImpactReport.Braced. So it counts
+            // every overdrive source (the click grant OR held SPACE+SHIFT) and every veto
+            // Caster.Tier has (overdrive lock, exhaustion, projected mana), instead of
+            // only asking whether the grant clock outlives the flight.
+            float eta = PlayerController.ImpactEta(_enemy);
+            float remaining = _controller?.BraceGrantRemaining ?? 0f;
+            bool granted = remaining > 0f;
+            var predict = _controller?.PredictBrace(eta) ?? PlayerController.BracePrediction.None;
+            bool covers = predict == PlayerController.BracePrediction.Braced;
+            string want = predict switch
+            {
+                PlayerController.BracePrediction.Braced => "BRACED",
+                PlayerController.BracePrediction.TooEarly => "TOO EARLY",
+                // Locked / exhausted / not enough mana: a brace is impossible, so the cue
+                // says so rather than inviting a click that cannot work (AC15).
+                PlayerController.BracePrediction.Blocked => "NO BRACE",
+                _ => "BRACE",
+            };
+            if (_braceLabel.Text != want)
+            {
+                _braceLabel.Text = want;
+                _braceLabel.AddThemeFontSizeOverride("font_size", want.Length > 6 ? 30 : 38);
+                _braceLabel.AddThemeColorOverride("font_color",
+                    covers ? new Color(0.7f, 0.95f, 1f)
+                    : want == "TOO EARLY" ? new Color(1f, 0.8f, 0.3f)
+                    : want == "NO BRACE" ? new Color(0.85f, 0.85f, 0.9f)
+                    : new Color(1f, 0.86f, 0.7f));
+            }
+            _braceFill.Color = covers
                 ? new Color(0.1f, 0.3f, 0.42f, 0.9f)
-                : new Color(0.3f + 0.25f * pulse, 0.07f, 0.05f, 0.9f);
+                : want == "TOO EARLY"
+                    ? new Color(0.33f, 0.19f, 0.02f, 0.92f)
+                    : want == "NO BRACE"
+                        ? new Color(0.16f, 0.16f, 0.19f, 0.92f)
+                        : new Color(0.3f + 0.25f * pulse, 0.07f, 0.05f, 0.9f);
+            // Secondary signal: the grant visibly draining. Blue while it covers the
+            // impact, amber while it is going to run out before the hit.
+            _braceGrantTrack.Visible = granted;
+            if (granted)
+            {
+                _braceGrantBar.Size = new Vector2(
+                    212f * Mathf.Clamp(remaining / PlayerController.BraceGrantDuration, 0f, 1f), 7f);
+                _braceGrantBar.Color = covers
+                    ? new Color(0.45f, 0.85f, 1f, 0.95f)
+                    : new Color(1f, 0.72f, 0.2f, 0.95f);
+            }
             _braceCue.Scale = Vector2.One * (_hoverBrace ? 1.1f : 1f);
             _braceCue.Modulate = _hoverBrace ? new Color(1.35f, 1.35f, 1.35f) : Colors.White;
         }
 
-        // --- PIP cue: informational only.
-        _pipCue.Visible = live && _player.PipReady && !playerBusy;
+        // --- PIP cue: informational only, and it yields to the Easy coach line, which
+        // used to carry the same sentence verbatim in the same band (X-1-11).
+        _pipCue.Visible = live && _player.PipReady && !playerBusy && !_coach.Visible;
         if (_pipCue.Visible) _pipCue.Modulate = new Color(1, 1, 1, 0.55f + 0.45f * pulse);
 
         // --- CHANNEL pad state: visibly distinct on/off (AC7) + hover (AC18).
@@ -649,18 +881,28 @@ public partial class Hud : CanvasLayer
                 ? new Color(0.14f, 0.34f, 0.46f, 0.88f)
                 : new Color(0.1f, 0.14f, 0.2f, 0.85f);
         _channelPadState.Text = latched ? "ON - click to release" : "OFF - click / hold SPACE";
-        _channelPad.Modulate = _hoverPad ? new Color(1.35f, 1.35f, 1.35f) : Colors.White;
+        _channelPad.Modulate = _hoverPad ? new Color(1.35f, 1.35f, 1.35f)
+            : live ? Colors.White : new Color(1, 1, 1, 0.45f);
         _channelPad.Scale = Vector2.One * (_hoverPad ? 1.05f : 1f);
 
         // --- Hover feedback on the strip and beam labels (AC18).
         if (live && _hoverSlot >= 0)
         {
-            _elementIcons[_hoverSlot].Scale = Vector2.One * 1.35f;
-            _elementIcons[_hoverSlot].Modulate = new Color(1.4f, 1.4f, 1.4f);
+            // Growth is now hover-only (the mark sits at 1.0), and the bracket drawn in
+            // the hit rect's own space carries the signal even on a marked, already
+            // full-brightness slot inside the SHATTER window (X-2-3).
+            _elementVisuals[_hoverSlot].Scale = Vector2.One * SlotHoverScale;
+            _elementVisuals[_hoverSlot].Modulate = new Color(1.6f, 1.6f, 1.6f);
         }
         if (live && _hoverBeam >= 0)
             _beamLabels[_hoverBeam].Modulate = new Color(1.5f, 1.5f, 1.5f);
     }
+
+    /// <summary>Re-reads BattleManager.Player. Build() captures it once, which is all a
+    /// real battle needs; the shots harness attaches a controller to a ScriptedMode
+    /// battle afterwards so the BRACED / TOO EARLY / NO BRACE treatments can actually be
+    /// photographed and signed off (X-2-6).</summary>
+    public void RebindController() => _controller = _battle.Player;
 
     private Main? MainNode() => GetTree().Root.GetNodeOrNull<Main>("Main");
 
@@ -742,8 +984,8 @@ public partial class Hud : CanvasLayer
         {
             bool active = (Element)i == _player.CurrentElement;
             bool incoming = _player.GatherTimer > 0f && (Element)i == pending;
-            _elementIcons[i].Scale = Vector2.One * (active || incoming ? 1.2f : 0.9f);
-            _elementIcons[i].Modulate = active || incoming ? Colors.White : new Color(1, 1, 1, 0.5f);
+            _elementVisuals[i].Scale = Vector2.One * (active || incoming ? 1.2f : 0.9f);
+            _elementVisuals[i].Modulate = active || incoming ? Colors.White : new Color(1, 1, 1, 0.5f);
 
             // Clamp: Glaciate pushes live cooldowns past the base constant.
             float cd = active ? 0f : Mathf.Min(1f, _player.ElementCooldown / Tuning.ElementSwitchCooldown);
@@ -898,7 +1140,7 @@ public partial class Hud : CanvasLayer
         // 4-5. Telegraphed enemy spikes.
         if (_enemy.CurrentElement == Element.Fire && _enemy.IsEmpowered
             && _enemy.FlareClock > Tuning.FlarePeriod - Tuning.FlareWindup && _player.Mana > 25f)
-            return (4, "FLARE COMING — click BRACE, or hold SHIFT, to brace through it", danger);
+            return (4, "FLARE COMING — click BRACE, or hold SPACE + SHIFT, to brace through it", danger);
         if (_enemy.CurrentElement == Element.Lightning && _enemy.CritArmed)
             return (5, "CRIT ARMED — don't switch now, switching triggers it", danger);
 
@@ -930,7 +1172,8 @@ public partial class Hud : CanvasLayer
     /// <summary>The when-to-press lesson: during an enemy element switch the bar
     /// sweeps from their press (t=0) to their impact (t=0.9s). Gold opening zone =
     /// counter-switch now and your entrance shatters them; red closing zone = hold
-    /// SHIFT so you are braced at the moment of impact. Also reused for Fire's
+    /// SPACE+SHIFT so you are braced at the moment of impact (SHIFT alone is not a
+    /// brace: Caster only reaches Overdrive with WantsChannel too). Also reused for Fire's
     /// flare windup (brace zone only). Easy difficulty only, like the coach.</summary>
     private void UpdateTimingBar()
     {

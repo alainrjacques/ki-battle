@@ -67,7 +67,8 @@ Every action has a key AND a click; no key lost function when the mouse layer la
 - CHANNEL (the one continuous input) is OR'd from three sources: hold SPACE, hold LMB on
   the arena background, or toggle the on-screen CHANNEL latch pad. The latch is not a free
   win — beam drain plus exhaust at 0 mana is the existing mana game. It resets on rematch.
-- OVERDRIVE stays momentary: hold SHIFT (or RMB-free: see the BRACE cue below).
+- OVERDRIVE stays momentary: hold SPACE+SHIFT (SHIFT alone is not a brace - Overdrive
+  needs WantsChannel too), or click the BRACE cue below.
 - LMB/RMB are deliberately NOT bound to the `channel`/`overdrive` actions: `Input.IsActionPressed`
   reads raw device state that a `Control` consuming the event does not clear, so a bound
   mouse button would make every HUD click silently empower the beam.
@@ -85,8 +86,21 @@ into the existing API — no new combat rules, no balance constants.
   (`PlayerController.BraceGrantDuration`). That is deliberately shorter than the 0.90 s
   entrance flight: a click fired at their press expires before impact, so the brace is
   missed. Timing stays the skill. An overdrive lock (Riptide) still suppresses it.
-- PIP cue: the pip socket pulses with a "PIP READY" line while the pip is lit and you are
-  free to switch. Informational only.
+  The cue answers one question — "will you actually be in Overdrive when the hit lands?" —
+  and that is what the word says. BRACED means yes, counting either source of overdrive
+  (the click grant or held SPACE+SHIFT) and every veto the power tier has: an overdrive
+  lock, exhaustion, or too little mana to survive the grant's own forced drain. A grant
+  that will expire before impact reads TOO EARLY with an amber draining bar; a state where
+  no click can brace at all (locked, exhausted, out of mana) reads NO BRACE. The feedback
+  can never promise protection that is not there, and never hides one you do have.
+- PIP cue: the pip socket pulses, with a short "PIP READY" marker while the pip is lit and
+  you are free to switch. Informational only, and it yields to the Easy coach line.
+
+Click targets cover everything that glows: a soul slot's hit rect contains its SHATTER
+halo, its digit and its element name, and the slots tile edge to edge so a click on a
+glowing tip can never fall through to the arena (which would start a channel hold
+instead of switching). Outside Fighting the strip, beam labels and CHANNEL pad stay
+drawn but inert - they are HUD furniture, not cues.
 
 ## Pre-fight
 LoadoutScreen becomes SOUL SELECT: pick 1 keystone (starting element, free returns).
