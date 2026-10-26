@@ -16,6 +16,15 @@ public partial class Game : Node
     public bool SmokeFlowMode { get; private set; }
     public bool ShotsMode { get; private set; }
 
+    /// <summary>`-- --ai-bench`: run the AI strength matrix instead of the smoke suite.</summary>
+    public bool AiBenchMode { get; private set; }
+
+    /// <summary>Fights per matchup in --ai-bench (`--bench-fights=N`).</summary>
+    public int BenchFights = 30;
+
+    /// <summary>`--bench-quick`: only the Hard-vs-Easy pair, for fast iteration.</summary>
+    public bool BenchQuick;
+
     public override void _Ready()
     {
         Instance = this;
@@ -25,6 +34,10 @@ public partial class Game : Node
             if (a == "--smoke") SmokeMode = true;
             if (a == "--smoke-flow") SmokeFlowMode = true;
             if (a == "--shots") ShotsMode = true;
+            if (a == "--ai-bench") AiBenchMode = true;
+            if (a == "--bench-quick") BenchQuick = true;
+            if (a.StartsWith("--bench-fights=") && int.TryParse(a.Substring(15), out int bf) && bf > 0)
+                BenchFights = bf;
         }
         ElementDb.ValidateIdentities();
         GD.Print("boot ok");

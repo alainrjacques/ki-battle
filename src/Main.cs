@@ -9,7 +9,7 @@ public partial class Main : Node
 
     public override void _Ready()
     {
-        if (Game.Instance.SmokeMode)
+        if (Game.Instance.SmokeMode || Game.Instance.AiBenchMode)
         {
             // Headless verification: straight into an AI-vs-AI battle.
             var smoke = new SmokeTest();

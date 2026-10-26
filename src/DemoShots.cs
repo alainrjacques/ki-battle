@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Godot;
 
@@ -87,11 +88,15 @@ public partial class DemoShots : Node
         await WaitSeconds(0.6f);
 
         // Hover a soul slot that is NOT the active one, so the screenshot separates the
-        // hover state from the active-slot treatment (AC18).
-        HoverAt(new Vector2(72 + 4 * 78 + 26, 1080 - 142)); // hover soul slot 5
+        // hover state from the active-slot treatment (AC18). HoverSlot asserts the hover
+        // registered; AssertBracketCaptured then reads it back out of the saved pixels.
+        var hud = battle.GetNode<Hud>("Hud");
+        await HoverSlot(hud, 4); // soul slot 5
         await WaitSeconds(0.3f);
-        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_idle.png");
+        var idleImg = GetViewport().GetTexture().GetImage();
+        idleImg.SavePng("user://shot_cue_idle.png");
         GD.Print("[shots] saved cue idle (no window open)");
+        AssertBracketCaptured(idleImg, 4, "shot_cue_idle.png");
 
         bool cueSwitch = battle.RightCaster.TrySwitchElement(Element.Water);
         GD.Print($"[shots] cue switch accepted={cueSwitch}");
@@ -99,10 +104,12 @@ public partial class DemoShots : Node
         GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_shatter.png");
         GD.Print($"[shots] saved cue shatter (enemyGather={battle.RightCaster.GatherTimer:0.00})");
 
-        HoverAt(new Vector2(960, 679)); // hover the BRACE cue itself
-        await WaitSeconds(0.3f); // reform: entrance in flight
-        GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_brace.png");
-        GD.Print($"[shots] saved cue brace (incoming={battle.RightCaster.IncomingEntrancePending})");
+        await WaitSeconds(0.3f); // reform: entrance in flight, so the cue exists to hover
+        await HoverBraceCue(hud);
+        var braceImg = GetViewport().GetTexture().GetImage();
+        braceImg.SavePng("user://shot_cue_brace.png");
+        GD.Print($"[shots] saved cue brace (incoming={battle.RightCaster.IncomingEntrancePending} "
+                 + $"cueWidthPx={MeasureCueWidth(braceImg, hud):0.0})");
 
         // --- BRACE label states (X-2-6). These only exist when a PlayerController is
         // present, so attach one to the scripted battle and rebind the HUD: the whole
@@ -132,21 +139,123 @@ public partial class DemoShots : Node
         GetViewport().GetTexture().GetImage().SavePng("user://shot_cue_braced.png");
         GD.Print($"[shots] saved cue BRACED (eta={etaBraced:0.00} predict={pc.PredictBrace(etaBraced)})");
 
-        GD.Print("[shots] done");
-        GetTree().Quit(0);
+        if (_hoverFailures == 0)
+        {
+            GD.Print("[shots] done");
+            GetTree().Quit(0);
+        }
+        else
+        {
+            GD.PrintErr($"[shots] SHOTS FAIL: {_hoverFailures} hover assertion(s) failed - the "
+                        + "cue PNGs do not contain the treatment they are supposed to prove");
+            GetTree().Quit(1);
+        }
     }
 
-    /// <summary>Moves the OS cursor over a viewport-space point so the screenshot
-    /// captures a hover state (AC18). The window is 1280x720 against a 1920x1080
-    /// viewport, and Input.WarpMouse takes window pixels.</summary>
-    private void HoverAt(Vector2 viewportPos)
+    private int _hoverFailures;
+
+    private Task HoverSlot(Hud hud, int slot) => Hover(hud, Hud.SlotCentre(slot),
+        $"soul slot {slot + 1}", () => hud.HoveredSlot == slot, () => hud.DebugSetHover(slot, false));
+
+    private Task HoverBraceCue(Hud hud) => Hover(hud, hud.BraceCueCentre,
+        "BRACE cue", () => hud.HoveredBraceCue, () => hud.DebugSetHover(-1, true));
+
+    /// <summary>Puts the pointer on a target and PROVES the hover registered before the caller
+    /// saves a PNG. The real path goes first (warp the OS cursor, then a synthesised motion
+    /// event) so the capture exercises the same code a player does - but Input.WarpMouse is a
+    /// silent no-op on an unfocused window, which is how five cue PNGs were saved with no hover
+    /// treatment in any of them while the harness reported success (X-3-2). So: try, verify,
+    /// fall back to the HUD's seam and say so, verify again, and if neither path produces a
+    /// hover, record a failure that makes the whole run exit non-zero.</summary>
+    private async Task Hover(Hud hud, Vector2 canvasPos, string what, Func<bool> registered, Action force)
     {
+        WarpTo(canvasPos);
+        await WaitSeconds(0.15f);
+        if (registered())
+        {
+            GD.Print($"[shots] hover {what}: registered via OS input at canvas {canvasPos}");
+            return;
+        }
+        GD.Print($"[shots] hover {what}: WARN warp + synthesised motion did not register "
+                 + $"(windowFocused={DisplayServer.WindowIsFocused()}); using the HUD seam");
+        force();
+        await WaitSeconds(0.15f);
+        if (registered())
+        {
+            GD.Print($"[shots] hover {what}: registered via the HUD seam");
+            return;
+        }
+        _hoverFailures++;
+        GD.PrintErr($"[shots] FAIL hover {what} did not register by either path");
+    }
+
+    /// <summary>The window is 1280x720 against a 1920x1080 canvas (stretch keep), so window
+    /// pixels are canvas pixels times the width ratio. WarpMouse takes window pixels.</summary>
+    private void WarpTo(Vector2 canvasPos)
+    {
+        DisplayServer.WindowMoveToForeground();
         float scale = GetWindow().Size.X / 1920f;
-        var p = viewportPos * scale;
+        var p = canvasPos * scale;
         Input.WarpMouse(p);
-        // A warp alone does not always emit motion; synthesise one so the Control
-        // actually enters its hover state before the capture.
-        Input.ParseInputEvent(new InputEventMouseMotion { Position = p, GlobalPosition = p });
+        // A warp alone does not always emit motion; synthesise one so the Control actually
+        // enters its hover state. Pushed at the window so it goes through the same GUI pick
+        // a real event does, rather than only updating the Input singleton.
+        GetWindow().PushInput(new InputEventMouseMotion { Position = p, GlobalPosition = p }, true);
+    }
+
+    /// <summary>Reads the hover bracket back out of the captured pixels. The state assert above
+    /// proves the HUD believes it is hovering; this proves the treatment reached the PNG, which
+    /// is the claim AC18 actually makes and the one that was false for three rounds.</summary>
+    private void AssertBracketCaptured(Image img, int slot, string shot)
+    {
+        var bar = Hud.SlotHoverBarRect(slot);
+        float s = img.GetWidth() / 1920f;
+        int x0 = Mathf.Max(0, (int)(bar.Position.X * s));
+        int x1 = Mathf.Min(img.GetWidth() - 1, (int)((bar.Position.X + bar.Size.X) * s));
+        int y0 = Mathf.Max(0, (int)(bar.Position.Y * s) - 1);
+        int y1 = Mathf.Min(img.GetHeight() - 1, (int)((bar.Position.Y + bar.Size.Y) * s) + 1);
+        int longest = 0;
+        for (int y = y0; y <= y1; y++)
+        {
+            int run = 0;
+            for (int x = x0; x <= x1; x++)
+            {
+                var px = img.GetPixel(x, y);
+                run = px.R > 0.75f && px.G > 0.75f && px.B > 0.75f ? run + 1 : 0;
+                longest = Mathf.Max(longest, run);
+            }
+        }
+        // The bar is SlotHitW-12 = 66 canvas px wide, i.e. 44 px at 720p. 5 px is a floor no
+        // antialiased label stroke in that band reaches, and QA measured 0 with no hover.
+        const int floorPx = 5;
+        if (longest >= floorPx)
+        {
+            GD.Print($"[shots] bracket in {shot}: longest white run {longest}px in "
+                     + $"x[{x0}..{x1}] y[{y0}..{y1}] (floor {floorPx})");
+            return;
+        }
+        _hoverFailures++;
+        GD.PrintErr($"[shots] FAIL no hover bracket in {shot}: longest white run {longest}px in "
+                    + $"x[{x0}..{x1}] y[{y0}..{y1}], floor {floorPx}");
+    }
+
+    /// <summary>Width in screen pixels of the BRACE cue's orange border along its centre row.
+    /// Printed, not asserted: this is the number that showed the cue sitting at scale 1.0 in
+    /// both the hovered and the unhovered shot (240 * 0.667 = 160 px), so it is worth keeping
+    /// on the record next to the hover state.</summary>
+    private static float MeasureCueWidth(Image img, Hud hud)
+    {
+        float s = img.GetWidth() / 1920f;
+        int y = Mathf.Clamp((int)(hud.BraceCueCentre.Y * s), 0, img.GetHeight() - 1);
+        int first = -1, last = -1;
+        for (int x = 0; x < img.GetWidth(); x++)
+        {
+            var px = img.GetPixel(x, y);
+            if (px.R <= 0.45f || px.R <= px.B * 1.4f) continue;
+            if (first < 0) first = x;
+            last = x;
+        }
+        return first < 0 ? 0f : last - first + 1;
     }
 
     private async Task WaitSeconds(float seconds)

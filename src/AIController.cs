@@ -24,8 +24,19 @@ public partial class AIController : Node
     private const float StayBonus = 0.5f;
     private const float SwitchThreshold = 0.25f;
 
-    private readonly Random _rng = new();
+    /// <summary>Seed for this controller's decision RNG. Every random choice the AI
+    /// makes (mistakes, discipline, punish zeal, Normal's brace/panic rolls) comes out
+    /// of this one stream, so a fixed seed replays a fight bit-for-bit. Test harnesses
+    /// set it before AddChild; live play leaves it negative for a fresh stream.</summary>
+    public int Seed = -1;
+
+    private Random _rng = null!;
     private float _tickAccum;
+
+    public override void _Ready()
+    {
+        _rng = new Random(Seed >= 0 ? Seed : Random.Shared.Next());
+    }
 
     private enum Stance { Sustain, Overdrive, Rest }
     private Stance _stance = Stance.Sustain;
@@ -75,7 +86,11 @@ public partial class AIController : Node
 
         _tickAccum += dt;
         if (_tickAccum < TickInterval) return;
-        _tickAccum = 0f;
+        // Carry the remainder instead of zeroing it: the decision cadence has to be
+        // 4 Hz of SIM time whatever the physics delta is. Zeroing turned --smoke's
+        // 0.1333 s step (TimeScale 8) into a 0.2667 s cadence - a 6.7% slower AI,
+        // and a different one again at any other TimeScale.
+        _tickAccum = Mathf.Min(_tickAccum - TickInterval, TickInterval);
 
         if (Battle.State != BattleState.Fighting)
         {
@@ -221,7 +236,31 @@ public partial class AIController : Node
         };
         // Recovery is for when the clash is safely away — resting while losing
         // ground trades territory for mana at a losing rate.
+        // Endgame conversion. Past SuddenDeathStart two things change at once:
+        // base regen is halved (BattleManager.StepFight) while EXHAUSTED regen is not,
+        // and escalation multiplies net push by up to ~12x. So late mana is only worth
+        // what it puts on the beam before the cap, and resting to a comfort buffer at
+        // 2.5 mana/s is strictly worse than channelling and taking the exhaust cycles.
+        // Measured (round 4, 20 seeded fights): Hard led at sudden death in 13/20 and
+        // won 6, because it hoarded ~15 mana at the free base beam (push 0.35) while
+        // Easy spent itself down the whole way. Hoarding WAS the difficulty regression.
+        //
+        // The mana line each difficulty is willing to spend down to in the endgame.
+        // Negative = never converts. 8 is one decision tick of single-beam drain plus
+        // margin, i.e. spend to the edge without face-planting into the 1.5 s exhaust;
+        // 13 leaves a comfort buffer that costs real push-seconds. This graded floor IS
+        // the difficulty ladder's main rung now (see coder-notes round 4 for the bench).
+        float endgameFloor = Difficulty switch
+        {
+            Difficulty.Easy => -1f,
+            Difficulty.Normal => 13f,
+            _ => 8f,
+        };
+        // Participating at all suppresses the rest-lock: a converter must never hand
+        // the endgame back to the 2.5 mana/s recovery loop it just opted out of.
+        bool endgameConverter = suddenDeath && endgameFloor >= 0f;
         bool desperate = losing > 0.3f
+                         || endgameConverter
                          || (Opponent.IsExhausted && oppMana < 0.2f && Target.Mana > 10f);
         if (_recovering && (Target.Mana > 28f || desperate)) _recovering = false;
         if (!_recovering && Target.Mana < 16f && !desperate && _rng.NextDouble() < discipline)
@@ -244,6 +283,13 @@ public partial class AIController : Node
             // punish just trades places in the exhaust cycle.
             _stance = Target.Mana > 40f ? Stance.Overdrive : Stance.Sustain;
         }
+
+        // The endgame floor is the exhaust line, not a buffer: the base beam is free, so
+        // every mana point still in the tank at the cap was never spent on anything.
+        // Overdrive is deliberately NOT forced here - it buys 1.25 push over idle for
+        // 21.4 mana/s against sustain's 0.65 for 7, i.e. half the push-seconds per mana.
+        if (endgameConverter && _stance == Stance.Rest && Target.Mana > endgameFloor)
+            _stance = Stance.Sustain;
 
         // A brace it can no longer afford gets dropped rather than exhausting into it.
         if (_braceHold > 0f && Target.Mana < 12f) _braceHold = 0f;

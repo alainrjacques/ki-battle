@@ -647,6 +647,44 @@ public partial class Hud : CanvasLayer
     /// the result panel is up (AC17).</summary>
     private bool Interactive => _battle.State == BattleState.Fighting && !_resultPanel.Visible;
 
+    // --- Screenshot-harness seams (X-3-2). Nothing in the game reads these; they exist so
+    // --shots can PROVE a hover registered before it saves a PNG, instead of saving five
+    // files with no hover treatment in any of them and reporting success.
+
+    /// <summary>Slot the pointer is on, or -1.</summary>
+    public int HoveredSlot => _hoverSlot;
+
+    /// <summary>True while the pointer is on the BRACE cue.</summary>
+    public bool HoveredBraceCue => _hoverBrace;
+
+    /// <summary>Centre of the BRACE cue in canvas coordinates - it moves with the clash,
+    /// so the harness must aim at the live rect rather than a baked 960.</summary>
+    public Vector2 BraceCueCentre => _braceCue.Position + _braceCue.Size / 2f;
+
+    /// <summary>Centre of soul slot `i`'s hit rect, in canvas coordinates.</summary>
+    public static Vector2 SlotCentre(int i) => new(
+        SlotIconX - SlotInsetX + i * SlotPitch + SlotHitW / 2f,
+        SlotIconY - SlotInsetY + SlotHitH / 2f);
+
+    /// <summary>The hover bracket's under-bar for slot `i` in canvas coordinates, derived from
+    /// the same constants BuildLoadoutStrip draws it from, so the harness can read the hover
+    /// treatment back out of the captured pixels and cannot drift from the real geometry.</summary>
+    public static Rect2 SlotHoverBarRect(int i) => new(
+        SlotIconX - SlotInsetX + i * SlotPitch + 6f,
+        SlotIconY - SlotInsetY + SlotHitH - 7f,
+        SlotHitW - 12f, 3f);
+
+    /// <summary>Sets the hover state directly, for the screenshot harness when synthesised OS
+    /// input does not register: Input.WarpMouse is a no-op on an unfocused window, which is how
+    /// the cue PNGs were captured with slot 5 at its resting modulate and the BRACE cue at
+    /// scale 1.0. UpdateMouseLayer still clears the state whenever the HUD is not Interactive,
+    /// so this cannot pin a hover the real pointer rules would forbid.</summary>
+    public void DebugSetHover(int slot, bool braceCue)
+    {
+        _hoverSlot = slot;
+        _hoverBrace = braceCue;
+    }
+
     private static bool IsLeftPress(InputEvent e) =>
         e is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true };
 

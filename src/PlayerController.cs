@@ -106,11 +106,32 @@ public partial class PlayerController : Node
 
         // Mana projection. No drain while exhausted (Tier is Idle then, Caster.Tick), and
         // net flow is monotonically negative under overdrive, so testing the end point is
-        // testing the minimum. regenScale (0.5 in sudden death) is ignored: that makes the
-        // projection optimistic by at most ~2.5 mana over a full grant.
+        // testing the minimum.
+        //
+        // MODELLED: the exhaust prefix and its recovery regen, Holy regen, the sudden-death
+        // regen scale (Target.RegenScale), the beam's overdrive drain, Water's FlowDrainMult,
+        // and Conduct INCLUDING its expiry part-way through the flight. That last one used to
+        // be frozen at the click: ConductTimer is a 3.0 s debuff that ticks down during the
+        // 0.90 s flight, so a projection that charges 1.5x drain for the whole window printed
+        // NO BRACE across a ~10 mana band in which the hit really did land braced (X-3-1).
+        //
+        // NOT MODELLED: BattleManager.TickSustainedDrains - an enemy Darkness dominance leech
+        // (LeechRate 3/s) and an Eclipse channel (EclipseStealRate 4/s). Both need the ENEMY
+        // caster and its dominance clock, which this input-layer node deliberately does not
+        // hold. The omission is one-sided optimistic and bounded: both are blocked at or below
+        // ManaOpFloor (10) and both are halved by a pinpoint beam, so over the longest window
+        // this projects (0.8 s) they can move the end point by at most 0.8*(3+4) = 5.6 mana,
+        // and neither can ever by itself cause the exhaustion the veto is looking for.
+        // Error bound on the mana term: ~5.6 mana optimistic, on top of the +-0.5 mana that
+        // any forward projection carries at a 60 Hz physics step (X-3-3).
         float exhaustLeft = Mathf.Min(Target.ExhaustTimer, odSeconds);
         float mana = Mathf.Min(Tuning.ManaMax, Target.Mana + Tuning.ManaRegenExhausted * exhaustLeft);
-        mana += (RegenPerSecond() - OverdriveDrainPerSecond()) * Mathf.Max(0f, odSeconds - exhaustLeft);
+        float odActive = Mathf.Max(0f, odSeconds - exhaustLeft);
+        // Conduct ticks through the exhaust prefix as well, so the conducted share of the
+        // overdrive window is whatever is left of the debuff once that prefix is spent.
+        float conducted = Mathf.Clamp(Target.ConductTimer - exhaustLeft, 0f, odActive);
+        mana += (RegenPerSecond() - DrainPerSecond(true)) * conducted;
+        mana += (RegenPerSecond() - DrainPerSecond(false)) * (odActive - conducted);
         if (mana <= 0f) return BracePrediction.Blocked;
 
         if (heldSource || grantSource) return BracePrediction.Braced;
@@ -120,16 +141,19 @@ public partial class PlayerController : Node
     /// <summary>The one boolean the BRACE label and --smoke share: braced at impact.</summary>
     public bool WillBeBracedAt(float impactEta) => PredictBrace(impactEta) == BracePrediction.Braced;
 
-    private float OverdriveDrainPerSecond()
+    /// <summary>Overdrive drain per second, with Conduct as a parameter rather than a read:
+    /// the projection needs both rates because the debuff can expire mid-flight (X-3-1).</summary>
+    private float DrainPerSecond(bool conducted)
     {
         float d = Tuning.BeamDrain[(int)Target.Beam] * Tuning.OverdriveDrainMult;
         if (Target.CurrentElement == Element.Water) d *= Tuning.FlowDrainMult;
-        if (Target.ConductTimer > 0f) d *= Tuning.ConductDrainMult;
+        if (conducted) d *= Tuning.ConductDrainMult;
         return d;
     }
 
     private float RegenPerSecond() =>
-        Tuning.ManaRegen + (Target.CurrentElement == Element.Holy ? Tuning.HolyRegen : 0f);
+        (Tuning.ManaRegen + (Target.CurrentElement == Element.Holy ? Tuning.HolyRegen : 0f))
+        * Target.RegenScale;
 
     public void ToggleChannelLatch() => ChannelLatch = !ChannelLatch;
 

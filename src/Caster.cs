@@ -49,6 +49,11 @@ public partial class Caster : Node2D
     public float PurgeImmunityTimer { get; private set; }  // no new debuffs, no leech
     public float EclipseTimer { get; private set; }        // this caster is CHANNELING a steal
 
+    /// <summary>The regen multiplier BattleManager last ticked this caster with (0.5 after
+    /// SuddenDeathStart, 1 before). Published so a forward mana projection can model sudden
+    /// death without plumbing the whole BattleManager into the input layer (X-3-3).</summary>
+    public float RegenScale { get; private set; } = 1f;
+
     // Soul passive state
     public float FlareClock { get; private set; }
     public float FlareActiveTimer { get; private set; }
@@ -95,6 +100,7 @@ public partial class Caster : Node2D
         ElementCooldown = BeamCooldown = ExhaustTimer = GatherTimer = ReformTimer = 0f;
         SinceReformEnd = 99f;
         ConductTimer = OverdriveLockTimer = PurgeImmunityTimer = EclipseTimer = 0f;
+        RegenScale = 1f;
         FlareClock = FlareActiveTimer = CritCharge = CritActiveTimer = StacksF = 0f;
         DominanceTime = 0f;
         CooldownRate = 1f;
@@ -170,6 +176,7 @@ public partial class Caster : Node2D
     /// <summary>Advance mana, timers, and soul passives by one physics step.</summary>
     public void Tick(float delta, float regenScale = 1f)
     {
+        RegenScale = regenScale;
         bool holy = CurrentElement == Element.Holy;
 
         // Pip
